@@ -1,5 +1,6 @@
 services:
-  app:
+  app-prod:
+    profiles: ["prod"]
     build:
       context: .
       args:
@@ -7,3 +8,30 @@ services:
         VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
     ports:
       - "8080:80"
+    restart: unless-stopped
+
+  app-dev:
+    profiles: ["dev"]
+    image: node:20-bookworm-slim
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
+
+      # Hot reload estável no Windows/WSL/Docker Desktop
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "200"
+
+      # Evita aviso de update do npm
+      NPM_CONFIG_UPDATE_NOTIFIER: "false"
+    volumes:
+      - .:/app
+      # mantém node_modules dentro do container (evita conflitos no Windows)
+      - /app/node_modules
+    command: >
+      sh -lc "
+        npm ci --foreground-scripts --no-audit --no-fund || npm install --foreground-scripts --no-audit --no-fund;
+        npm run dev -- --host 0.0.0.0 --port 5173
+      "
