@@ -79,6 +79,15 @@ function Test-PortInUse {
 function Compose-Up {
   param([string]$Profile)
 
+  # 1. Inicia o Supabase primeiro (necessário para gerar o arquivo .temp usado no include)
+  Write-Section "Iniciando Infraestrutura Supabase"
+  & npx supabase start
+  if ($LASTEXITCODE -ne 0) {
+    throw "Falha ao iniciar o Supabase CLI."
+  }
+
+  # 2. Sobe a aplicação (o include no docker-compose.yml fará o resto)
+  Write-Section "Subindo Aplicação MediaShare ($Profile)"
   & docker compose --profile $Profile up -d --build
   if ($LASTEXITCODE -ne 0) {
     throw "Falha ao subir o ambiente ($Profile)."
@@ -88,7 +97,14 @@ function Compose-Up {
 function Compose-Down {
   param([string]$Profile)
 
+  Write-Section "Encerrando Tudo (App + Supabase)"
+  
+  # 1. Para a aplicação e remove volumes do Compose
   & docker compose --profile $Profile down --remove-orphans --volumes
+
+  # 2. Para a infraestrutura do Supabase e APAGA os dados (Full Reset)
+  Write-Host "Limpando infraestrutura do Supabase..."
+  & npx supabase stop --no-backup
 }
 
 function Print-Status {
@@ -112,7 +128,7 @@ Import-DotEnv -Path $dotenvPath
 
 # --- define porta e URL ---
 $port = if ($perfil -eq "dev") { 5173 } else { 8080 }
-$url  = if ($perfil -eq "dev") { "http://localhost:5173" } else { "http://localhost:8080" }
+$url  = if ($perfil -eq "dev") { "http://jupiter.local:5173" } else { "http://jupiter.local:8080" }
 
 # =====================================================
 # DOWN (limpa tudo)

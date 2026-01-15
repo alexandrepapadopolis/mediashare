@@ -1,0 +1,4 @@
+services:
+  storage:
+    volumes:
+      - ${MEDIA_PATH}:/mnt

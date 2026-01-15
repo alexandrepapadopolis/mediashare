@@ -1,1 +1,45 @@
 project_id = "mediashare"
+
+# =================================================================
+# CONFIGURAÇÃO GLOBAL DO SUPABASE LOCAL
+# =================================================================
+
+[api]
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+port = 54323
+
+# =================================================================
+# CONFIGURAÇÃO DE STORAGE (MÍDIAS)
+# =================================================================
+
+[storage]
+enabled = true
+
+# Na versão 2.x, a sintaxe de buckets automáticos mudou para evitar o erro de 'struct'
+[storage.buckets.media]
+public = true
+allowed_mime_types = ["image/*", "video/*", "application/pdf"]
+
+# =================================================================
+# CONFIGURAÇÃO DE AUTENTICAÇÃO (AUTH)
+# =================================================================
+[auth]
+site_url = "http://jupiter.local:5173"
+additional_redirect_urls = ["http://jupiter.local:5173","http://jupiter:5173"]
+enable_signup = true
+
+# =================================================================
+# LOGS E ANALYTICS (OPCIONAL)
+# =================================================================
+
+[analytics]
+enabled = false
