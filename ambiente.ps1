@@ -87,7 +87,7 @@ function Compose-Up {
   }
 
   # 2. Sobe a aplicação (o include no docker-compose.yml fará o resto)
-  Write-Section "Subindo Aplicação MediaShare ($Profile)"
+  Write-Section "Subindo Aplicação Phosio ($Profile)"
   & docker compose --profile $Profile up -d --build
   if ($LASTEXITCODE -ne 0) {
     throw "Falha ao subir o ambiente ($Profile)."
@@ -143,9 +143,9 @@ if ($acao -eq "down") {
   Write-Host "Limpando networks remanescentes do projeto..."
 
   # remove a network somente se existir (evita erro "not found")
-  $net = docker network ls --format "{{.Name}}" | Where-Object { $_ -eq "mediashare_default" }
+  $net = docker network ls --format "{{.Name}}" | Where-Object { $_ -eq "phosio_default" }
   if ($net) {
-    docker network rm mediashare_default | Out-Null
+    docker network rm phosio_default | Out-Null
   }
 
   # prune defensivo (não derruba o script se falhar)

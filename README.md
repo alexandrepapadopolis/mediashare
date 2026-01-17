@@ -1,6 +1,6 @@
-# MediaShare
+# Phosio
 
-MediaShare é uma aplicação web para **catálogo e gerenciamento de mídias**, organizada por categorias, construída com **React + Vite + TypeScript** e integrada ao **Supabase** (Auth, Database, Storage e APIs).
+Phosio é uma aplicação web para **catálogo e gerenciamento de mídias**, organizada por categorias, construída com **React + Vite + TypeScript** e integrada ao **Supabase** (Auth, Database, Storage e APIs).
 
 O projeto é totalmente executável em ambiente local usando **Docker**, com separação clara entre **ambiente de desenvolvimento (hot reload)** e **ambiente de produção (build + Nginx)**.
 

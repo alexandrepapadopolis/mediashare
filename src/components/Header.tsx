@@ -29,9 +29,9 @@ export function Header({ onSearch }: HeaderProps) {
       <div className="container flex h-16 items-center justify-between gap-4">
         <Link to="/" className="flex items-center gap-2">
           <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-sm">M</span>
+            <span className="text-primary-foreground font-bold text-sm">P</span>
           </div>
-          <span className="font-semibold text-lg hidden sm:inline">MediaShare</span>
+          <span className="font-semibold text-lg hidden sm:inline">Phosio</span>
         </Link>
 
         <form onSubmit={handleSearch} className="flex-1 max-w-md">

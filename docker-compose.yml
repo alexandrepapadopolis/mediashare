@@ -1,11 +1,11 @@
-name: mediashare
+name: phosio
 
 services:
   # ----------------------------------------------------------
   # APLICAÇÃO WEB (FRONTEND)
   # ----------------------------------------------------------
   app-dev:
-    container_name: mediashare-app-dev
+    container_name: phosio-app-dev
     profiles: ["dev"]
     image: node:20-bookworm-slim
     working_dir: /app
@@ -25,7 +25,7 @@ services:
     
     command: >
       sh -lc "
-        echo 'Iniciando MediaShare Web...';
+        echo 'Iniciando Phosio Web...';
         npm ci --foreground-scripts || npm install --foreground-scripts;
         npm run dev -- --host 0.0.0.0 --port 5173
       "
@@ -34,7 +34,7 @@ services:
   # PRODUÇÃO
   # ----------------------------------------------------------
   app-prod:
-    container_name: mediashare-app-prod
+    container_name: phosio-app-prod
     profiles: ["prod"]
     build:
       context: .

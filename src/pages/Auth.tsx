@@ -87,7 +87,7 @@ export default function Auth() {
           <div className="h-12 w-12 rounded-xl bg-primary flex items-center justify-center mx-auto mb-4">
             <span className="text-primary-foreground font-bold text-xl">M</span>
           </div>
-          <CardTitle className="text-2xl">MediaShare</CardTitle>
+          <CardTitle className="text-2xl">Phosio</CardTitle>
           <CardDescription>Compartilhe suas fotos e vídeos</CardDescription>
         </CardHeader>
         <CardContent>

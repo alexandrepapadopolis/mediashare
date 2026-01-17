@@ -1,0 +1,416 @@
+{
+  "diagnosis": {
+    "current_stack": "Frontend: React 18 + Vite + TypeScript + Tailwind CSS + shadcn/ui; Client data layer: TanStack React Query; Routing: React Router. Backend/BaaS: Supabase (Auth, Postgres, Storage, PostgREST, Realtime, Kong gateway) executando local via Docker. Infra: Docker Compose; DEV com Vite HMR (5173) e PROD com build estatico servido via Nginx (8080).",
+    "current_architecture": "SPA (single-page app) com build estatico (Vite) servido via Nginx; autenticação e consumo do Supabase predominantemente no cliente (browser).",
+    "auth_status": "Supabase Auth presente no stack e integrado (README cita Supabase Auth). No estado atual, por ser SPA, o fluxo tende a depender de sessão/token no cliente; proteção de rotas normalmente feita via guards no frontend.",
+    "assumptions": [
+      "O repositório está acessível publicamente, porém a listagem de arquivos em subdiretórios (ex.: docs/ e src/) não está carregando via interface HTML do GitHub no ambiente de inspeção; portanto, a proposta abaixo se baseia no README exibido na página principal do repositório.",
+      "O projeto usa Supabase local padrão (porta 54321 para API Gateway) e expõe VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY via .env.",
+      "Há ou haverá necessidade de SSR/MPA real (HTML renderizado no servidor) para atender ao requisito de não ser SPA e para melhorar SEO/performance/segurança.",
+      "A aplicação deve permanecer com Supabase como BaaS (evitar introduzir um backend próprio completo), mas será necessário um runtime servidor (Node) para SSR e para sessões seguras via cookies httpOnly.",
+      "Reutilização máxima do UI kit atual (Tailwind + shadcn/ui) e parte de componentes deve ser possível, porém a camada de rotas e bootstrapping mudará substancialmente.",
+      "O fluxo de verificação de e-mail será suportado por Supabase (signup com email confirmation), com página dedicada para feedback e reenvio de confirmação."
+    ]
+  },
+  "plan": {
+    "overview": "Migrar de SPA estática (Vite + React Router) para uma arquitetura SSR/MPA baseada em React no servidor, mantendo Supabase como BaaS. Entregar uma landing pública moderna (Phosio), autenticação com páginas dedicadas (login/signup/verify-email) e uma área autenticada (/app) no padrão de catálogo de mídia (grid/list, tags, busca, paginação, detalhe e relacionados). Reforçar segurança (cookies httpOnly, proteção de rotas no servidor, validação de entrada, headers) e acessibilidade (WCAG AA). Estruturar tudo em passos que viram issues.",
+    "architecture_decision": "Adotar Remix (SSR-first, MPA com navegação aprimorada) por ser alinhado ao ecossistema React Router já presente no projeto, reduzindo atrito conceitual e permitindo rotas server-rendered com loaders/actions. Usar helpers SSR do Supabase para gerenciar sessão via cookies httpOnly no servidor. Manter Tailwind + shadcn/ui. Substituir build estático servido por Nginx por um serviço Node SSR (podendo permanecer atrás de Nginx como reverse proxy).",
+    "implementation_steps": [
+      {
+        "step_id": "P01",
+        "title": "Inventário técnico e baseline de rotas/funcionalidades atuais",
+        "description": "Mapear as rotas atuais do React Router, componentes principais, queries do React Query e o modelo de dados no Supabase (tabelas, views, policies e buckets). Definir o mínimo migrável (UI e serviços). Registrar decisões no docs/ (migração SPA->SSR, implicações de deploy, e checklist de regressão).",
+        "dependencies": []
+      },
+      {
+        "step_id": "P02",
+        "title": "Bootstrap do runtime SSR (Remix) preservando UI (Tailwind + shadcn/ui)",
+        "description": "Introduzir Remix no projeto e criar a estrutura de app SSR. Configurar Tailwind e shadcn/ui no pipeline do Remix. Definir layout base com header/footer, padrões de espaçamento, tipografia e tokens de cor suaves para o branding Phosio. Garantir SSR funcional localmente com Docker.",
+        "dependencies": [
+          "P01"
+        ]
+      },
+      {
+        "step_id": "P03",
+        "title": "Camada de autenticação SSR com Supabase (cookies httpOnly) e proteção de rotas",
+        "description": "Implementar integração Supabase SSR: criar utilitário de servidor para inicializar o client Supabase com leitura/escrita de cookies. Definir guard server-side para rotas /app (redirect para /login quando não autenticado). Implementar criação de sessão e logout via actions, evitando persistência de tokens em localStorage. Configurar atributos Secure/SameSite/HttpOnly conforme ambiente.",
+        "dependencies": [
+          "P02"
+        ]
+      },
+      {
+        "step_id": "P04",
+        "title": "Landing page pública (/) com branding Phosio e CTAs",
+        "description": "Criar landing SSR acessível e responsiva: hero com nome Phosio, descrição curta do produto, benefícios (organização por tags, busca, compartilhamento de acervo), e CTAs primários para Entrar e Criar conta. Implementar header público com navegação mínima. Garantir SEO básico (title, meta description, Open Graph).",
+        "dependencies": [
+          "P02"
+        ]
+      },
+      {
+        "step_id": "P05",
+        "title": "Páginas dedicadas de autenticação: /login, /signup, /verify-email",
+        "description": "Implementar páginas SSR para login e signup com e-mail/senha e login social. Exigir verificação de e-mail no signup. Implementar /verify-email para: instruções, feedback de confirmação, reenvio de e-mail e estados de erro. Redirecionar pós-login para /app. Implementar logout em /app (ação server-side).",
+        "dependencies": [
+          "P03",
+          "P04"
+        ]
+      },
+      {
+        "step_id": "P06",
+        "title": "OAuth social: Google e Apple (obrigatórios) + Microsoft/GitHub (opcionais)",
+        "description": "Configurar provedores OAuth no Supabase e criar botões de login social nas páginas /login e /signup. Garantir callback e tratamento SSR. Manter provedores opcionais atrás de feature flags/config (habilitar somente se configurados no ambiente).",
+        "dependencies": [
+          "P05"
+        ]
+      },
+      {
+        "step_id": "P07",
+        "title": "Área autenticada (/app): listagem, tags, busca e paginação (SSR loaders)",
+        "description": "Implementar /app como catálogo: grid/list responsivo, filtros por tags/categorias, campo de busca, paginação por querystring (ex.: ?q=...&tag=...&page=...). Carregar dados via loader SSR com Supabase (server-side), reduzindo exposição do publishable key no cliente ao mínimo necessário. Garantir estados de loading/empty/error e navegação rápida.",
+        "dependencies": [
+          "P03",
+          "P05"
+        ]
+      },
+      {
+        "step_id": "P08",
+        "title": "Página de detalhe de mídia com relacionados por tags",
+        "description": "Implementar rota /app/media/:id (ou /app/m/:id) SSR: exibir mídia, metadados, tags, ações (ex.: favoritar/like se já existir), e seção de sugestões relacionadas por sobreposição de tags. Garantir que o acesso é autenticado e que as queries respeitam RLS/policies do Supabase.",
+        "dependencies": [
+          "P07"
+        ]
+      },
+      {
+        "step_id": "P09",
+        "title": "Hardening de segurança: validação, headers, cookies, rate limiting básico",
+        "description": "Adicionar validação de entrada server-side (forms e querystrings), padronizar mensagens de erro, configurar headers de segurança (CSP, X-Frame-Options, Referrer-Policy, Permissions-Policy) e proteção CSRF compatível com forms SSR. Garantir cookies Secure/SameSite e rotação de sessão quando aplicável. Implementar rate limiting leve em endpoints sensíveis (login, resend verify) no nível do app (in-memory) e/ou via Nginx.",
+        "dependencies": [
+          "P03",
+          "P05"
+        ]
+      },
+      {
+        "step_id": "P10",
+        "title": "Acessibilidade e consistência visual (WCAG AA) + responsividade mobile-first",
+        "description": "Revisar componentes e páginas: contraste, foco visível, navegação por teclado, labels/aria, estados de erro acessíveis, tamanhos de toque no mobile, e consistência de espaçamento/tipografia. Adicionar testes manuais de A11y e checklist por página.",
+        "dependencies": [
+          "P04",
+          "P05",
+          "P07",
+          "P08"
+        ]
+      },
+      {
+        "step_id": "P11",
+        "title": "Atualização de Docker/Compose e Nginx para SSR (reverse proxy) + documentação",
+        "description": "Atualizar Dockerfile e docker-compose para rodar o servidor Remix (Node) em PROD. Manter Nginx como reverse proxy (TLS/headers/cache) se desejado. Atualizar scripts de ambiente (ambiente.bat/ps1) para novos serviços/ports. Atualizar README e docs/ com instruções de DEV/PROD e troubleshooting.",
+        "dependencies": [
+          "P02",
+          "P09"
+        ]
+      },
+      {
+        "step_id": "P12",
+        "title": "Testes automatizados mínimos (smoke + rotas + auth)",
+        "description": "Adicionar testes: unitários para utilitários (cookies/session), integração leve para loaders/actions (auth redirect, listagem paginada), e smoke e2e básico (login -> /app -> detalhe). Incluir no pipeline local (npm scripts).",
+        "dependencies": [
+          "P05",
+          "P07",
+          "P08"
+        ]
+      }
+    ]
+  },
+  "pages_and_flows": {
+    "public": [
+      {
+        "route": "/",
+        "purpose": "Landing pública do Phosio com foco em SEO, credibilidade e conversão para autenticação.",
+        "key_elements": [
+          "Header público com logo/nome Phosio",
+          "Hero com proposta de valor (catálogo e organização por tags)",
+          "CTAs primários: Entrar e Criar conta (acima da dobra)",
+          "Seção de recursos: tags, busca, compartilhamento do acervo",
+          "Footer com links (Termos/Privacidade se existirem), contato e copyright",
+          "Metatags SEO (title/description/OG)"
+        ]
+      }
+    ],
+    "auth": [
+      {
+        "route": "/login",
+        "purpose": "Autenticação de usuários via e-mail/senha e provedores sociais; redireciona para /app após sucesso.",
+        "providers": [
+          "email_password",
+          "google",
+          "apple",
+          "microsoft_optional",
+          "github_optional"
+        ],
+        "notes": "Usar SSR actions para login; evitar tokens no localStorage; botões opcionais aparecem somente se configurados no ambiente. Link para /signup e para reenvio de confirmação quando necessário."
+      },
+      {
+        "route": "/signup",
+        "purpose": "Cadastro com e-mail/senha e opção de login social; exige verificação de e-mail.",
+        "providers": [
+          "email_password",
+          "google",
+          "apple",
+          "microsoft_optional",
+          "github_optional"
+        ],
+        "notes": "Após signup, direcionar para /verify-email com estado 'pending'. Bloquear acesso a /app até e-mail verificado (conforme configuração do Supabase)."
+      },
+      {
+        "route": "/verify-email",
+        "purpose": "Página de instruções e confirmação de verificação; permite reenvio de e-mail e trata erros/expiração.",
+        "providers": [],
+        "notes": "Estados: pending (instruções), success (confirmado), error (token inválido/expirado), resend (solicitar novo e-mail). Se já autenticado e verificado, oferecer botão 'Ir para o app'."
+      }
+    ],
+    "authenticated": [
+      {
+        "route": "/app",
+        "purpose": "Home autenticada no padrão catálogo de mídia (descoberta e organização).",
+        "features": [
+          "Grid/list alternável (preferência persistida em cookie/servidor)",
+          "Filtro por tags/categorias (multi-select opcional)",
+          "Busca por texto (querystring)",
+          "Paginação (querystring) e tamanho de página configurável",
+          "Estados vazios e sugestões de refinamento (UX)",
+          "Links para detalhe da mídia"
+        ]
+      },
+      {
+        "route": "/app/tags",
+        "purpose": "Exploração focada em tags/categorias (índice).",
+        "features": [
+          "Lista/grade de tags com contagem",
+          "Busca por tag",
+          "Navegação para /app?tag=..."
+        ]
+      },
+      {
+        "route": "/app/media/:id",
+        "purpose": "Detalhe da mídia e contexto de navegação.",
+        "features": [
+          "Exibição da mídia (imagem/vídeo) com fallback",
+          "Metadados (título, data, tags, proprietário se aplicável)",
+          "Sugestões relacionadas por sobreposição de tags",
+          "Ações (ex.: favoritar/like, compartilhar link interno) se já existir no produto"
+        ]
+      },
+      {
+        "route": "/logout",
+        "purpose": "Encerrar sessão e retornar para /.",
+        "features": [
+          "Action server-side para limpar cookies/sessão",
+          "Redirect para /"
+        ]
+      }
+    ]
+  },
+  "files_to_change": [
+    {
+      "path": "README.md",
+      "type": "modify",
+      "responsibility": "Atualizar branding (Phosio), arquitetura SSR/MPA, instruções de DEV/PROD, variáveis de ambiente e fluxos de autenticação."
+    },
+    {
+      "path": "docs/",
+      "type": "modify",
+      "responsibility": "Atualizar/adição de documentação: decisão arquitetural (SPA->SSR), rotas, padrões de segurança, UX guidelines e checklist de migração."
+    },
+    {
+      "path": "package.json",
+      "type": "modify",
+      "responsibility": "Substituir/ajustar scripts para build/run SSR; adicionar dependências do framework SSR (Remix) e do Supabase SSR; manter Tailwind/shadcn."
+    },
+    {
+      "path": "vite.config.ts",
+      "type": "modify",
+      "responsibility": "Descontinuar Vite como app principal (pode permanecer apenas se usado internamente) ou remover se não for mais necessário após migração para Remix."
+    },
+    {
+      "path": "index.html",
+      "type": "delete",
+      "responsibility": "Arquivo de entrada SPA deixa de ser o entrypoint; SSR passa a gerar HTML via servidor."
+    },
+    {
+      "path": "src/",
+      "type": "modify",
+      "responsibility": "Migrar componentes reutilizáveis para a nova estrutura SSR (ex.: app/components). Remover bootstrapping SPA e rotas React Router no cliente."
+    },
+    {
+      "path": "app/",
+      "type": "create",
+      "responsibility": "Nova pasta do Remix: rotas SSR, loaders/actions, layouts, páginas públicas e autenticadas."
+    },
+    {
+      "path": "app/routes/_index.tsx",
+      "type": "create",
+      "responsibility": "Landing page pública (/) com branding Phosio e CTAs."
+    },
+    {
+      "path": "app/routes/login.tsx",
+      "type": "create",
+      "responsibility": "Página SSR de login com email/senha e OAuth providers."
+    },
+    {
+      "path": "app/routes/signup.tsx",
+      "type": "create",
+      "responsibility": "Página SSR de cadastro com verificação obrigatória."
+    },
+    {
+      "path": "app/routes/verify-email.tsx",
+      "type": "create",
+      "responsibility": "Página SSR de confirmação/instruções e reenvio de e-mail."
+    },
+    {
+      "path": "app/routes/app._index.tsx",
+      "type": "create",
+      "responsibility": "Dashboard /app com listagem, filtros por tag, busca e paginação."
+    },
+    {
+      "path": "app/routes/app.tags.tsx",
+      "type": "create",
+      "responsibility": "Índice de tags/categorias."
+    },
+    {
+      "path": "app/routes/app.media.$id.tsx",
+      "type": "create",
+      "responsibility": "Detalhe de mídia com relacionados por tags."
+    },
+    {
+      "path": "app/routes/logout.tsx",
+      "type": "create",
+      "responsibility": "Encerramento de sessão via action SSR e redirect."
+    },
+    {
+      "path": "app/utils/supabase.server.ts",
+      "type": "create",
+      "responsibility": "Factory do Supabase client no servidor com cookies httpOnly (SSR)."
+    },
+    {
+      "path": "app/utils/auth.server.ts",
+      "type": "create",
+      "responsibility": "Guards de autenticação/redirect e helpers (ex.: requireUser)."
+    },
+    {
+      "path": ".env.example",
+      "type": "modify",
+      "responsibility": "Adicionar variáveis necessárias para SSR e OAuth (ex.: site URL/callbacks) mantendo o mínimo e sem expor segredos no cliente."
+    },
+    {
+      "path": "Dockerfile",
+      "type": "modify",
+      "responsibility": "Ajustar build/run para servidor SSR Node (Remix) em produção."
+    },
+    {
+      "path": "docker-compose.yml",
+      "type": "modify",
+      "responsibility": "Atualizar serviços/ports para SSR; manter Supabase local; ajustar dependências entre containers."
+    },
+    {
+      "path": "nginx.conf",
+      "type": "modify",
+      "responsibility": "Trocar serving estático por reverse proxy para o servidor SSR; adicionar headers de segurança e caching apropriado."
+    },
+    {
+      "path": "public/",
+      "type": "modify",
+      "responsibility": "Adicionar assets do Phosio (logo, og-image) e manter conteúdo estático compatível com SSR."
+    },
+    {
+      "path": "ambiente.bat",
+      "type": "modify",
+      "responsibility": "Atualizar comandos para subir DEV/PROD considerando SSR."
+    },
+    {
+      "path": "ambiente.ps1",
+      "type": "modify",
+      "responsibility": "Atualizar comandos para subir DEV/PROD considerando SSR."
+    }
+  ],
+  "acceptance_criteria": {
+    "landing_page": [
+      "Rota / é pública, SSR e não depende de carregamento SPA para exibir conteúdo principal.",
+      "Exibe nome Phosio, texto de valor e CTAs 'Entrar' e 'Criar conta' acima da dobra em desktop e mobile.",
+      "Layout responsivo (mobile-first), com navegação por teclado e foco visível.",
+      "Title/description e metatags OG presentes."
+    ],
+    "authentication": [
+      "Rotas /login, /signup e /verify-email existem como páginas dedicadas SSR.",
+      "Login por e-mail/senha funcional (quando habilitado no Supabase).",
+      "OAuth Google e Apple disponíveis e funcionais; Microsoft/GitHub aparecem apenas se configurados.",
+      "Signup exige verificação de e-mail; /verify-email cobre estados pending/success/error e reenvio.",
+      "Após login bem-sucedido, redirect para /app."
+    ],
+    "post_login_flow": [
+      "Rotas /app e /app/media/:id são protegidas no servidor: usuário não autenticado recebe redirect para /login.",
+      "/app lista conteúdos em grid/list com paginação, busca e filtro por tags.",
+      "Detalhe /app/media/:id exibe sugestões relacionadas por tags.",
+      "Logout encerra sessão via servidor e redireciona para /."
+    ],
+    "ui_ux": [
+      "Componentes e páginas possuem consistência visual (spacing, tipografia, botões, inputs, estados).",
+      "Mensagens de erro são claras e alinhadas ao contexto (login/signup/busca).",
+      "Estados de loading/empty/error são tratados sem layout shift significativo.",
+      "A navegação principal do /app permite descoberta rápida (tags + busca + paginação)."
+    ],
+    "security": [
+      "Sessão baseada em cookies httpOnly (evitar localStorage para tokens).",
+      "Cookies em produção com Secure=true e SameSite apropriado.",
+      "Validação server-side de entradas (forms e querystrings) e tratamento de erros sem vazar detalhes sensíveis.",
+      "Headers de segurança aplicados (CSP, X-Frame-Options ou frame-ancestors via CSP, Referrer-Policy, Permissions-Policy).",
+      "Proteção CSRF compatível com forms SSR para ações sensíveis (login, signup, resend)."
+    ]
+  },
+  "risks": [
+    {
+      "risk": "Migração estrutural grande (SPA Vite -> SSR Remix) pode quebrar fluxos existentes e aumentar o esforço inicial.",
+      "impact": "Alto: risco de regressões, retrabalho e atraso.",
+      "mitigation": "Executar P01 (inventário) antes; migrar por fatias (landing/auth/app) e manter branch de compatibilidade; criar checklist de regressão e smoke tests (P12)."
+    },
+    {
+      "risk": "Integração Supabase SSR incorreta pode resultar em loops de redirect, sessões instáveis ou vazamento de tokens.",
+      "impact": "Alto: falhas de login e risco de segurança.",
+      "mitigation": "Centralizar sessão em utilitários server-side, padronizar cookies e callbacks, testar cenários (fresh login, refresh, logout, expired session) e revisar atributos de cookie por ambiente."
+    },
+    {
+      "risk": "Configuração OAuth (Google/Apple) exige ajustes externos no Supabase e consoles dos provedores.",
+      "impact": "Médio: bloqueia login social se não configurado corretamente.",
+      "mitigation": "Documentar variáveis/URLs de callback e validar em ambiente local/staging; esconder botões opcionais quando não configurado; incluir checklist de configuração no docs/."
+    },
+    {
+      "risk": "RLS/policies e modelagem no Supabase podem não suportar bem as queries de catálogo (busca, tags, relacionados) sob SSR.",
+      "impact": "Médio/Alto: dados incompletos ou vazamento/negação indevida.",
+      "mitigation": "Revisar policies e índices (tags, media_tags, search columns), usar filtros no servidor respeitando RLS e testar com usuários distintos."
+    },
+    {
+      "risk": "Performance e cache inadequados no SSR podem aumentar latência em listagens grandes.",
+      "impact": "Médio: UX degradada.",
+      "mitigation": "Paginação obrigatória, índices no Postgres, caching leve no Nginx para assets, e otimização de queries (selects mínimos, limites)."
+    }
+  ],
+  "validation": {
+    "local_run": [
+      "Docker: subir Supabase local e app SSR em DEV; validar /, /login, /signup, /verify-email, /app.",
+      "Docker: subir stack de PROD (SSR + Nginx reverse proxy) e validar portas conforme documentação.",
+      "Verificar .env carregando corretamente (sem necessidade de variáveis globais no sistema)."
+    ],
+    "manual_tests": [
+      "Landing: responsividade (320px a 1440px), teclado-only, leitor de tela básico (labels/aria).",
+      "Auth: signup -> confirmação pendente -> confirmar e-mail -> login -> /app.",
+      "Auth: login social Google e Apple (quando configurados) com retorno correto ao /app.",
+      "Rotas: acessar /app deslogado redireciona para /login; acessar /app/media/:id deslogado redireciona para /login.",
+      "Catálogo: buscar, filtrar por tag, paginar e abrir detalhe; validar relacionados por tags.",
+      "Logout: encerra sessão e impede retorno ao /app via back/refresh."
+    ],
+    "automated_tests": [
+      "Unit: utilitários de sessão/cookies e validação de inputs.",
+      "Integration: loaders/actions críticos (requireUser redirect, login action, listagem com querystring).",
+      "E2E smoke: fluxo mínimo (login -> /app -> abrir detalhe -> logout)."
+    ]
+  }
+}

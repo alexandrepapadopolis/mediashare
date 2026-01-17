@@ -1,5 +1,5 @@
 -- 000_initial_schema.sql
--- Schema base do MediaShare (mínimo necessário para o loader e para o app)
+-- Schema base do Phosio (mínimo necessário para o loader e para o app)
 
 -- Extensão para gen_random_uuid() (normalmente já existe no Supabase, mas garantimos)
 create extension if not exists pgcrypto;
