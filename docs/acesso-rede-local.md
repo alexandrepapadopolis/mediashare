@@ -1,6 +1,6 @@
 # Documentação de Configuração: Acesso em Rede Local (jupiter)
 
-Este documento descreve as configurações aplicadas para permitir que o ambiente de desenvolvimento **MediaShare**, hospedado no desktop **jupiter**, seja acessível por dispositivos externos (celulares e tablets) na rede local.
+Este documento descreve as configurações aplicadas para permitir que o ambiente de desenvolvimento **Phosio**, hospedado no desktop **jupiter**, seja acessível por dispositivos externos (celulares e tablets) na rede local.
 
 ## 1. Infraestrutura de Rede (Roteador Deco)
 
