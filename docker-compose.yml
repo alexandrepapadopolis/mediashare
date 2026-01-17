@@ -7,10 +7,12 @@ services:
   app-dev:
     container_name: phosio-app-dev
     profiles: ["dev"]
-    image: node:20-bookworm-slim
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
     working_dir: /app
     ports:
-      - "5173:5173"
+      - "5173:3000"
 
     environment:
       VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
@@ -22,12 +24,13 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
-    
+
+
     command: >
       sh -lc "
         echo 'Iniciando Phosio Web...';
-        npm ci --foreground-scripts || npm install --foreground-scripts;
-        npm run dev -- --host 0.0.0.0 --port 5173
+        [ -x node_modules/.bin/remix ] || npm ci --foreground-scripts --no-audit --no-fund;
+        ./node_modules/.bin/remix dev -c './node_modules/.bin/remix-serve build/index.js --host 0.0.0.0 --port 3000'
       "
 
   # ----------------------------------------------------------
