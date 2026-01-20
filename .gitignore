@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+.cache/
 
 # Node
 node_modules/
@@ -9,6 +10,9 @@ node_modules/
 # Build
 dist/
 dist-ssr/
+build/
+public/build/
+
 
 # Logs
 logs/
@@ -26,3 +30,6 @@ Thumbs.db
 .idea/
 supabase/.temp/
 gh-issues.sh
+
+# Supabase local snippets (dev-only)
+supabase/snippets/
