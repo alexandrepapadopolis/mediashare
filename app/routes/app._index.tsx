@@ -9,9 +9,17 @@ import {
   useNavigation,
   useRouteError,
 } from "@remix-run/react";
-import { destroySession, getSession, requireAccessToken } from "../utils/session.server";
+import {
+  destroySession,
+  getSession,
+  requireAccessToken,
+} from "../utils/session.server";
 import { createSupabaseServerClientWithAccessToken } from "../utils/supabase.server";
-import { isInvalidAuthError, parseMediaQuery, queryMedia } from "../utils/media.server";
+import {
+  isInvalidAuthError,
+  parseMediaQuery,
+  queryMedia,
+} from "../utils/media.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const accessToken = await requireAccessToken(request);
@@ -62,7 +70,8 @@ export default function AppIndexRoute() {
     const params = new URLSearchParams();
 
     if (appliedFilters.q) params.set("q", appliedFilters.q);
-    if (appliedFilters.tags.length > 0) params.set("tags", appliedFilters.tags.join(","));
+    if (appliedFilters.tags.length > 0)
+      params.set("tags", appliedFilters.tags.join(","));
 
     params.set("page", String(nextPage));
     params.set("pageSize", String(appliedFilters.pageSize));
@@ -79,7 +88,8 @@ export default function AppIndexRoute() {
         <h1 className="text-xl font-semibold">Catálogo (placeholder SSR)</h1>
 
         <p className="mt-2 text-sm text-muted-foreground">
-          Próximo passo: listar mídias do Supabase, filtros por tags, busca e paginação.
+          Próximo passo: listar mídias do Supabase, filtros por tags, busca e
+          paginação.
         </p>
 
         <p className="mt-2 text-xs text-muted-foreground">
@@ -116,11 +126,7 @@ export default function AppIndexRoute() {
           </div>
 
           {/* page reset implícito: não enviar page */}
-          <input
-            type="hidden"
-            name="pageSize"
-            value={String(appliedFilters.pageSize)}
-          />
+          <input type="hidden" name="pageSize" value={String(appliedFilters.pageSize)} />
 
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -137,10 +143,7 @@ export default function AppIndexRoute() {
             {appliedFilters.tags.length > 0 ? (
               <div className="ml-auto flex flex-wrap gap-2">
                 {appliedFilters.tags.map((t) => (
-                  <span
-                    key={t}
-                    className="rounded-full bg-muted px-3 py-1 text-xs"
-                  >
+                  <span key={t} className="rounded-full bg-muted px-3 py-1 text-xs">
                     {t}
                   </span>
                 ))}
@@ -150,9 +153,7 @@ export default function AppIndexRoute() {
         </Form>
 
         <div className="mt-4 rounded-xl bg-muted p-3">
-          <div className="text-xs font-medium">
-            State from loader (URL source of truth)
-          </div>
+          <div className="text-xs font-medium">State from loader (URL source of truth)</div>
           <pre className="mt-2 overflow-auto text-xs">
             {JSON.stringify(appliedFilters, null, 2)}
           </pre>
@@ -168,7 +169,9 @@ export default function AppIndexRoute() {
             to={buildPageHref(appliedFilters.page - 1)}
             prefetch="intent"
             aria-disabled={!hasPrev}
-            className={`rounded-xl border px-4 py-2 text-sm ${!hasPrev ? "pointer-events-none opacity-50" : ""}`}
+            className={`rounded-xl border px-4 py-2 text-sm ${
+              !hasPrev ? "pointer-events-none opacity-50" : ""
+            }`}
           >
             Anterior
           </Link>
@@ -182,12 +185,13 @@ export default function AppIndexRoute() {
             to={buildPageHref(appliedFilters.page + 1)}
             prefetch="intent"
             aria-disabled={!hasNext}
-            className={`ml-auto rounded-xl border px-4 py-2 text-sm ${!hasNext ? "pointer-events-none opacity-50" : ""}`}
+            className={`ml-auto rounded-xl border px-4 py-2 text-sm ${
+              !hasNext ? "pointer-events-none opacity-50" : ""
+            }`}
           >
             Próxima
           </Link>
         </div>
-
       </div>
 
       {/* Grid de resultados (indentação estável, sem ruído de diff) */}
@@ -196,25 +200,31 @@ export default function AppIndexRoute() {
           Nenhum item encontrado para os filtros atuais.
         </div>
       ) : null}
+
       <div className="grid gap-4 md:grid-cols-3">
         {items.length === 0
           ? Array.from({ length: 9 }).map((_, i) => (
-            <div key={i} className="rounded-2xl border bg-white p-4">
-              <div className="aspect-video rounded-lg bg-muted" />
-              <div className="mt-3 h-4 w-2/3 rounded bg-muted" />
-              <div className="mt-2 h-3 w-1/2 rounded bg-muted" />
-            </div>
-          ))
-          : items.map((it) => (
-            <div key={it.id} className="rounded-2xl border bg-white p-4">
-              <div className="aspect-video rounded-lg bg-muted" />
-              <div className="mt-3 text-sm font-medium">{it.title}</div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {it.media_type} •{" "}
-                {new Date(it.created_at).toLocaleString()}
+              <div key={i} className="rounded-2xl border bg-white p-4">
+                <div className="aspect-video rounded-lg bg-muted" />
+                <div className="mt-3 h-4 w-2/3 rounded bg-muted" />
+                <div className="mt-2 h-3 w-1/2 rounded bg-muted" />
               </div>
-            </div>
-          ))}
+            ))
+          : items.map((it) => (
+              <Link
+                key={it.id}
+                to={`/app/media/${it.id}`}
+                prefetch="intent"
+                className="block rounded-2xl border bg-white p-4 hover:bg-muted/40"
+                aria-label={`Abrir detalhes: ${it.title ?? "mídia"}`}
+              >
+                <div className="aspect-video rounded-lg bg-muted" />
+                <div className="mt-3 text-sm font-medium">{it.title}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {it.media_type} • {new Date(it.created_at).toLocaleString()}
+                </div>
+              </Link>
+            ))}
       </div>
     </div>
   );
@@ -242,4 +252,3 @@ export function ErrorBoundary() {
     </div>
   );
 }
-
