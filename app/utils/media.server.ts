@@ -44,7 +44,9 @@ export type MediaItem = {
 export type MediaQueryResult = {
     items: MediaItem[];
     total: number;
+    pageCount: number;
     hasNext: boolean;
+    hasPrev: boolean;
     appliedFilters: {
         q: string | null;
         tags: string[];
@@ -52,6 +54,7 @@ export type MediaQueryResult = {
         pageSize: number;
     };
 };
+
 
 export function isInvalidAuthError(err: unknown): boolean {
     if (!err || typeof err !== "object") return false;
@@ -146,16 +149,39 @@ export async function queryMedia(opts: {
     }
 
     const { data, error, count } = await query;
-    if (error) throw error;
+    if (error) {
+        // PostgREST: range fora do total => tratar como vazio (não é falha do sistema)
+        if ((error as any).code === "PGRST103") {
+            const total = 0;
+            const pageCount = 0;
+            const hasPrev = page > 1;
+            const hasNext = false;
 
-    const total = typeof count === "number" ? count : 0;
-    const items = (data ?? []) as MediaItem[];
-    const hasNext = from + items.length < total;
+            return {
+                items: [],
+                total,
+                pageCount,
+                hasPrev,
+                hasNext,
+                appliedFilters: { q, tags, page, pageSize },
+            };
+        }
+
+        throw error;
+    }
+
+    const total = count ?? 0;
+    const pageCount = total > 0 ? Math.ceil(total / pageSize) : 0;
+    const hasPrev = page > 1;
+    const hasNext = page * pageSize < total;
 
     return {
-        items,
+        items: (data ?? []) as MediaItem[],
         total,
+        pageCount,
+        hasPrev,
         hasNext,
         appliedFilters: { q, tags, page, pageSize },
     };
+
 }

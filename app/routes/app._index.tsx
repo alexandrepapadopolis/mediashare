@@ -1,7 +1,14 @@
 // app/routes/app._index.tsx
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData } from "@remix-run/react";
+import {
+  Form,
+  Link,
+  isRouteErrorResponse,
+  useLoaderData,
+  useNavigation,
+  useRouteError,
+} from "@remix-run/react";
 import { destroySession, getSession, requireAccessToken } from "../utils/session.server";
 import { createSupabaseServerClientWithAccessToken } from "../utils/supabase.server";
 import { isInvalidAuthError, parseMediaQuery, queryMedia } from "../utils/media.server";
@@ -45,11 +52,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export default function AppIndexRoute() {
-  const { userEmail, appliedFilters, items, total, hasNext } =
+  const { userEmail, appliedFilters, items, total, hasNext, hasPrev, pageCount } =
     useLoaderData<typeof loader>();
+
+  const navigation = useNavigation();
+  const isLoading = navigation.state !== "idle";
+
+  function buildPageHref(nextPage: number) {
+    const params = new URLSearchParams();
+
+    if (appliedFilters.q) params.set("q", appliedFilters.q);
+    if (appliedFilters.tags.length > 0) params.set("tags", appliedFilters.tags.join(","));
+
+    params.set("page", String(nextPage));
+    params.set("pageSize", String(appliedFilters.pageSize));
+
+    return `/app?${params.toString()}`;
+  }
 
   return (
     <div className="space-y-6">
+      {isLoading ? (
+        <div className="rounded-2xl border bg-white p-4 text-sm">Carregando…</div>
+      ) : null}
       <div className="rounded-2xl border bg-white p-6">
         <h1 className="text-xl font-semibold">Catálogo (placeholder SSR)</h1>
 
@@ -137,29 +162,84 @@ export default function AppIndexRoute() {
           <span>Total: {total}</span>
           <span>HasNext: {hasNext ? "yes" : "no"}</span>
         </div>
+
+        <div className="mt-4 flex items-center gap-2">
+          <Link
+            to={buildPageHref(appliedFilters.page - 1)}
+            prefetch="intent"
+            aria-disabled={!hasPrev}
+            className={`rounded-xl border px-4 py-2 text-sm ${!hasPrev ? "pointer-events-none opacity-50" : ""}`}
+          >
+            Anterior
+          </Link>
+
+          <div className="text-sm text-muted-foreground">
+            Página {appliedFilters.page}
+            {pageCount > 0 ? ` de ${pageCount}` : ""}
+          </div>
+
+          <Link
+            to={buildPageHref(appliedFilters.page + 1)}
+            prefetch="intent"
+            aria-disabled={!hasNext}
+            className={`ml-auto rounded-xl border px-4 py-2 text-sm ${!hasNext ? "pointer-events-none opacity-50" : ""}`}
+          >
+            Próxima
+          </Link>
+        </div>
+
       </div>
 
       {/* Grid de resultados (indentação estável, sem ruído de diff) */}
+      {!isLoading && items.length === 0 ? (
+        <div className="rounded-2xl border bg-white p-4 text-sm text-muted-foreground">
+          Nenhum item encontrado para os filtros atuais.
+        </div>
+      ) : null}
       <div className="grid gap-4 md:grid-cols-3">
         {items.length === 0
           ? Array.from({ length: 9 }).map((_, i) => (
-              <div key={i} className="rounded-2xl border bg-white p-4">
-                <div className="aspect-video rounded-lg bg-muted" />
-                <div className="mt-3 h-4 w-2/3 rounded bg-muted" />
-                <div className="mt-2 h-3 w-1/2 rounded bg-muted" />
-              </div>
-            ))
+            <div key={i} className="rounded-2xl border bg-white p-4">
+              <div className="aspect-video rounded-lg bg-muted" />
+              <div className="mt-3 h-4 w-2/3 rounded bg-muted" />
+              <div className="mt-2 h-3 w-1/2 rounded bg-muted" />
+            </div>
+          ))
           : items.map((it) => (
-              <div key={it.id} className="rounded-2xl border bg-white p-4">
-                <div className="aspect-video rounded-lg bg-muted" />
-                <div className="mt-3 text-sm font-medium">{it.title}</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {it.media_type} •{" "}
-                  {new Date(it.created_at).toLocaleString()}
-                </div>
+            <div key={it.id} className="rounded-2xl border bg-white p-4">
+              <div className="aspect-video rounded-lg bg-muted" />
+              <div className="mt-3 text-sm font-medium">{it.title}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {it.media_type} •{" "}
+                {new Date(it.created_at).toLocaleString()}
               </div>
-            ))}
+            </div>
+          ))}
       </div>
     </div>
   );
 }
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+
+  if (isRouteErrorResponse(error)) {
+    return (
+      <div className="rounded-2xl border bg-white p-6">
+        <h1 className="text-lg font-semibold">Erro</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {error.status} {error.statusText}
+        </p>
+      </div>
+    );
+  }
+
+  const message = error instanceof Error ? error.message : "Erro inesperado";
+  return (
+    <div className="rounded-2xl border bg-white p-6">
+      <h1 className="text-lg font-semibold">Erro</h1>
+      <p className="mt-2 text-sm text-muted-foreground">{message}</p>
+    </div>
+  );
+}
+
