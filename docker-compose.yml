@@ -1,15 +1,10 @@
 name: phosio
 
 services:
-  # ----------------------------------------------------------
-  # APLICAÇÃO WEB (FRONTEND)
-  # ----------------------------------------------------------
   app-dev:
     container_name: phosio-app-dev
     profiles: ["dev"]
-    build:
-      context: .
-      dockerfile: Dockerfile.dev
+    image: node:20-bookworm-slim
     working_dir: /app
     ports:
       - "5173:3000"
@@ -17,25 +12,29 @@ services:
     environment:
       VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
       VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
+      SESSION_SECRET: ${SESSION_SECRET}
       CHOKIDAR_USEPOLLING: "true"
       CHOKIDAR_INTERVAL: "200"
       NPM_CONFIG_UPDATE_NOTIFIER: "false"
+      HOST: 0.0.0.0
+      PORT: "3000"
+
 
     volumes:
       - .:/app
-      - /app/node_modules
-
+      - phosio_node_modules:/app/node_modules
 
     command: >
       sh -lc "
+        set -e;
         echo 'Iniciando Phosio Web...';
-        [ -x node_modules/.bin/remix ] || npm ci --foreground-scripts --no-audit --no-fund;
-        ./node_modules/.bin/remix dev -c './node_modules/.bin/remix-serve build/index.js --host 0.0.0.0 --port 3000'
+        if [ ! -x ./node_modules/.bin/remix ]; then
+          echo 'Instalando dependências (npm ci)...';
+          npm ci --foreground-scripts --no-audit --no-fund;
+        fi;
+        ./node_modules/.bin/remix dev
       "
 
-  # ----------------------------------------------------------
-  # PRODUÇÃO
-  # ----------------------------------------------------------
   app-prod:
     container_name: phosio-app-prod
     profiles: ["prod"]
@@ -47,3 +46,6 @@ services:
     ports:
       - "8080:80"
     restart: unless-stopped
+
+volumes:
+  phosio_node_modules:

@@ -4,6 +4,7 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
+      "~/*": ["./app/*"],
       "@/*": ["./src/*"]
     },
     "noImplicitAny": false,
