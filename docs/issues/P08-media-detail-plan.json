@@ -1,0 +1,141 @@
+```json
+{
+  "plan": {
+    "issue_key": "P08",
+    "title": "Detalhe da mídia + ações básicas (SSR)",
+    "summary": "Adicionar navegação lista → detalhe com rota autenticada SSR em /app/media/$id, loader robusto (validação, auth, 404) e UI mínima de metadados + placeholder de preview, sem alterar auth/session e sem OAuth social.",
+    "notes": [
+      "Manter Supabase apenas como IdP; Remix mantém sessão em cookie httpOnly.",
+      "Sem tokens em localStorage/sessionStorage.",
+      "Em token inválido/ausente: destroySession + redirect /login.",
+      "Sem mudanças em OAuth/social login e sem mexer no pipeline de sessão."
+    ]
+  },
+  "prs": [
+    {
+      "pr": "PR1",
+      "goal": "Criar rota de detalhe autenticada SSR /app/media/$id com loader + UI mínima + ErrorBoundary.",
+      "branch": "feature/p08-media-detail-route",
+      "commits": [
+        "feat(p08): add media detail route (Refs #<issue>)",
+        "feat(p08): finalize media detail route (Closes #<issue>)"
+      ],
+      "responsibilities": [
+        "Nova rota `app/routes/app.media.$id.tsx`.",
+        "Loader SSR: valida id; lê sessão; se não autenticado, destroySession e redirect /login.",
+        "Consulta 1 item no PostgREST (por id).",
+        "Se não encontrado: 404.",
+        "UI SSR: metadados principais + placeholder de preview.",
+        "ErrorBoundary/route error: 404 e erro genérico."
+      ]
+    },
+    {
+      "pr": "PR2",
+      "goal": "Adicionar link na listagem /app para navegar ao detalhe.",
+      "branch": "feature/p08-media-detail-link",
+      "commits": [
+        "feat(p08): link list items to detail (Refs #<issue>)",
+        "feat(p08): finalize list → detail navigation (Closes #<issue>)"
+      ],
+      "responsibilities": [
+        "Tornar cada item da listagem clicável apontando para `/app/media/:id`.",
+        "Não alterar filtros/paginação existentes (P07).",
+        "Manter SSR e GET-based UI."
+      ],
+      "files_likely": [
+        "app/routes/app._index.tsx (ou o arquivo atual que implementa a página /app)"
+      ]
+    },
+    {
+      "pr": "PR3",
+      "goal": "Botão “voltar” preservando querystring de origem (opcional, mas recomendado).",
+      "branch": "feature/p08-media-detail-backlink",
+      "commits": [
+        "feat(p08): preserve origin querystring on back (Refs #<issue>)",
+        "feat(p08): finalize back navigation preservation (Closes #<issue>)"
+      ],
+      "responsibilities": [
+        "Ao clicar em um item na lista, anexar `?from=<encoded>` (ou `from=`) com a querystring atual.",
+        "Na página de detalhe, botão “Voltar” usa `from` quando presente; fallback para `/app`."
+      ]
+    }
+  ],
+  "files_to_change": {
+    "pr1": [
+      "app/routes/app.media.$id.tsx"
+    ],
+    "pr2": [
+      "app/routes/app._index.tsx (ou o arquivo atual da rota /app)",
+      "Opcional: componente de item de lista, se existir (ex.: app/components/MediaCard.tsx)"
+    ],
+    "pr3": [
+      "app/routes/app._index.tsx (ou componente que renderiza itens)",
+      "app/routes/app.media.$id.tsx"
+    ]
+  },
+  "acceptance_criteria": [
+    "A rota autenticada `/app/media/:id` renderiza SSR e exige sessão válida.",
+    "Se sessão ausente/expirada: `destroySession` e redirect para `/login`.",
+    "Se `id` inválido: retornar 400 (ou 404; ver decisão no PR1) sem vazar detalhes.",
+    "Se item não existir: retornar 404 com UI clara.",
+    "A UI exibe, no mínimo: título (ou fallback), tipo, created_at e tags (quando existirem).",
+    "Nenhuma mudança em auth/session/OAuth; nenhum token em storage do browser.",
+    "PR2: itens em `/app` navegam para `/app/media/:id`.",
+    "PR3: botão Voltar preserva filtros/paginação (querystring) quando disponível."
+  ],
+  "risks": [
+    {
+      "risk": "Nome da tabela/view no PostgREST pode não ser `media`.",
+      "mitigation": "No PR1, ajustar `MEDIA_TABLE` para refletir o que já é usado no loader do P07."
+    },
+    {
+      "risk": "Chave do token no cookie session pode ter nome diferente (ex.: accessToken vs access_token).",
+      "mitigation": "No PR1, ler ambas; manter compatibilidade sem alterar o modelo de sessão."
+    },
+    {
+      "risk": "Formato de tags pode variar (array, string, join table).",
+      "mitigation": "Renderizar tags de forma defensiva; se desconhecido, mostrar vazio sem quebrar a página."
+    },
+    {
+      "risk": "Políticas/RLS podem bloquear acesso ao item mesmo com token válido.",
+      "mitigation": "Tratar 401/403 como sessão inválida apenas se for o comportamento já adotado no P07; caso contrário, exibir erro de autorização."
+    }
+  ],
+  "git_commands": {
+    "create_branch_pr1": [
+      "cd /e/GitHub/mediashare",
+      "git checkout main",
+      "git pull --rebase origin main",
+      "git checkout -b feature/p08-media-detail-route"
+    ],
+    "commit_pr1": [
+      "git add app/routes/app.media.$id.tsx",
+      "git commit -m \"feat(p08): add media detail route (Refs #<issue>)\"",
+      "git commit -m \"feat(p08): finalize media detail route (Closes #<issue>)\""
+    ],
+    "push_pr1": [
+      "git push -u origin feature/p08-media-detail-route"
+    ],
+    "merge_after_pr_approved": [
+      "git checkout main",
+      "git pull --rebase origin main",
+      "git merge --no-ff feature/p08-media-detail-route",
+      "git push origin main"
+    ],
+    "post_merge_cleanup": [
+      "git branch -d feature/p08-media-detail-route",
+      "git push origin --delete feature/p08-media-detail-route"
+    ]
+  },
+  "pr1_code": {
+    "app/routes/app.media.$id.tsx": "import type { LoaderFunctionArgs } from \"@remix-run/node\";\nimport { json, redirect } from \"@remix-run/node\";\nimport {\n  isRouteErrorResponse,\n  Link,\n  useLoaderData,\n  useRouteError,\n} from \"@remix-run/react\";\n\n// Ajuste estes imports para os paths já existentes no seu repo.\n// A premissa é: já existe um session storage via createCookieSessionStorage,\n// com getSession() e destroySession() usados em loaders protegidos.\nimport { getSession, destroySession } from \"~/session.server\";\n\ntype MediaDetail = {\n  id: string;\n  title: string | null;\n  media_type: string | null;\n  created_at: string | null;\n  tags: unknown;\n};\n\nconst MEDIA_TABLE = \"media\"; // Ajuste para o mesmo recurso/tabela usado no P07.\n\nfunction getAccessTokenFromSession(session: any): string | null {\n  // Compatível com chaves comuns sem mudar o modelo de sessão.\n  return (\n    session.get?.(\"access_token\") ||\n    session.get?.(\"accessToken\") ||\n    session.get?.(\"sb-access-token\") ||\n    null\n  );\n}\n\nfunction requireEnv(name: string): string {\n  const v = process.env[name];\n  if (!v) throw new Error(`Missing env var: ${name}`);\n  return v;\n}\n\nfunction isLikelyUuid(value: string): boolean {\n  // Validação leve: evita query lixo; não depende de libs externas.\n  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(\n    value\n  );\n}\n\nasync function fetchMediaById(args: {\n  supabaseUrl: string;\n  supabaseAnonKey: string;\n  accessToken: string;\n  id: string;\n}): Promise<MediaDetail | null> {\n  const { supabaseUrl, supabaseAnonKey, accessToken, id } = args;\n\n  // PostgREST endpoint padrão do Supabase\n  const url = new URL(`${supabaseUrl}/rest/v1/${MEDIA_TABLE}`);\n  url.searchParams.set(\"id\", `eq.${id}`);\n  url.searchParams.set(\"select\", \"id,title,media_type,created_at,tags\");\n  url.searchParams.set(\"limit\", \"1\");\n\n  const res = await fetch(url.toString(), {\n    headers: {\n      apikey: supabaseAnonKey,\n      Authorization: `Bearer ${accessToken}`,\n      Accept: \"application/json\",\n    },\n  });\n\n  // Se o token estiver inválido/expirado, o comportamento pode variar (401/403).\n  // Aqui tratamos como \"não autenticado\" e delegamos ao loader para destruir sessão.\n  if (res.status === 401 || res.status === 403) {\n    const err = new Error(\"AUTH_INVALID\");\n    (err as any).code = \"AUTH_INVALID\";\n    throw err;\n  }\n\n  if (!res.ok) {\n    const text = await res.text().catch(() => \"\");\n    throw new Error(`PostgREST error ${res.status}: ${text}`);\n  }\n\n  const data = (await res.json()) as MediaDetail[];\n  return data?.[0] ?? null;\n}\n\nexport async function loader({ request, params }: LoaderFunctionArgs) {\n  const id = params.id;\n  if (!id) {\n    throw new Response(\"Missing id\", { status: 400 });\n  }\n\n  // Decisão: se você usa UUIDs como id (comum em Supabase), valide.\n  // Se seu id não for UUID, remova/ajuste esta validação.\n  if (!isLikelyUuid(id)) {\n    throw new Response(\"Invalid id\", { status: 400 });\n  }\n\n  const cookieHeader = request.headers.get(\"Cookie\");\n  const session = await getSession(cookieHeader);\n  const accessToken = getAccessTokenFromSession(session);\n\n  if (!accessToken) {\n    return redirect(\"/login\", {\n      headers: {\n        \"Set-Cookie\": await destroySession(session),\n      },\n    });\n  }\n\n  const supabaseUrl = requireEnv(\"SUPABASE_URL\");\n  const supabaseAnonKey = requireEnv(\"SUPABASE_ANON_KEY\");\n\n  try {\n    const media = await fetchMediaById({\n      supabaseUrl,\n      supabaseAnonKey,\n      accessToken,\n      id,\n    });\n\n    if (!media) {\n      throw new Response(\"Not Found\", { status: 404 });\n    }\n\n    return json({ media });\n  } catch (e: any) {\n    if (e?.code === \"AUTH_INVALID\" || e?.message === \"AUTH_INVALID\") {\n      return redirect(\"/login\", {\n        headers: {\n          \"Set-Cookie\": await destroySession(session),\n        },\n      });\n    }\n    throw e;\n  }\n}\n\nexport default function MediaDetailRoute() {\n  const { media } = useLoaderData<typeof loader>();\n\n  // Render defensivo de tags: pode ser array, string, null, etc.\n  const tagsText = Array.isArray(media.tags)\n    ? media.tags.filter(Boolean).join(\", \")\n    : typeof media.tags === \"string\"\n      ? media.tags\n      : \"\";\n\n  return (\n    <div className=\"mx-auto max-w-4xl px-4 py-6\">\n      <div className=\"mb-4\">\n        <Link\n          to=\"/app\"\n          className=\"text-sm text-blue-600 hover:underline\"\n        >\n          Voltar\n        </Link>\n      </div>\n\n      <div className=\"rounded-lg border bg-white p-5\">\n        <h1 className=\"text-xl font-semibold\">\n          {media.title ?? \"(sem título)\"}\n        </h1>\n\n        <div className=\"mt-3 grid gap-2 text-sm\">\n          <div>\n            <span className=\"font-medium\">Tipo:</span> {media.media_type ?? \"—\"}\n          </div>\n          <div>\n            <span className=\"font-medium\">Criado em:</span> {media.created_at ?? \"—\"}\n          </div>\n          <div>\n            <span className=\"font-medium\">Tags:</span> {tagsText || \"—\"}\n          </div>\n          <div>\n            <span className=\"font-medium\">ID:</span> {media.id}\n          </div>\n        </div>\n\n        <div className=\"mt-6\">\n          <div className=\"mb-2 text-sm font-medium\">Preview</div>\n          <div className=\"flex h-64 items-center justify-center rounded-md border bg-gray-50 text-sm text-gray-600\">\n            Placeholder de preview (imagem/vídeo)\n          </div>\n        </div>\n      </div>\n    </div>\n  );\n}\n\nexport function ErrorBoundary() {\n  const error = useRouteError();\n\n  if (isRouteErrorResponse(error)) {\n    if (error.status === 404) {\n      return (\n        <div className=\"mx-auto max-w-3xl px-4 py-10\">\n          <h1 className=\"text-xl font-semibold\">Mídia não encontrada</h1>\n          <p className=\"mt-2 text-sm text-gray-700\">\n            O item solicitado não existe ou você não tem acesso.\n          </p>\n          <div className=\"mt-4\">\n            <Link to=\"/app\" className=\"text-sm text-blue-600 hover:underline\">\n              Voltar para a lista\n            </Link>\n          </div>\n        </div>\n      );\n    }\n\n    return (\n      <div className=\"mx-auto max-w-3xl px-4 py-10\">\n        <h1 className=\"text-xl font-semibold\">Erro</h1>\n        <p className=\"mt-2 text-sm text-gray-700\">\n          {error.status} {error.statusText}\n        </p>\n        <div className=\"mt-4\">\n          <Link to=\"/app\" className=\"text-sm text-blue-600 hover:underline\">\n            Voltar para a lista\n          </Link>\n        </div>\n      </div>\n    );\n  }\n\n  return (\n    <div className=\"mx-auto max-w-3xl px-4 py-10\">\n      <h1 className=\"text-xl font-semibold\">Erro inesperado</h1>\n      <p className=\"mt-2 text-sm text-gray-700\">\n        {(error as any)?.message ?? \"Falha ao carregar o detalhe.\"}\n      </p>\n      <div className=\"mt-4\">\n        <Link to=\"/app\" className=\"text-sm text-blue-600 hover:underline\">\n          Voltar para a lista\n        </Link>\n      </div>\n    </div>\n  );\n}\n"
+  },
+  "implementation_notes_pr1": [
+    "Ajuste o import `~/session.server` para o arquivo real do seu projeto (sem mudar o conteúdo do módulo).",
+    "Confirme as env vars existentes: usei `SUPABASE_URL` e `SUPABASE_ANON_KEY` por serem padrão; se no seu repo tiver nomes diferentes, apenas alinhe os nomes (sem alterar o modelo de auth).",
+    "Ajuste `MEDIA_TABLE` e o `select` para refletirem exatamente o recurso usado em P07 (mesmo schema/view/tabela).",
+    "Se o `id` não for UUID, remova/ajuste `isLikelyUuid()` e a validação 400.",
+    "Após alterar arquivos no host, para refletir no processo Node conforme seu padrão: `docker restart phosio-app-dev`."
+  ]
+}
+```
