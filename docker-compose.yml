@@ -9,16 +9,20 @@ services:
     ports:
       - "5173:3000"
 
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
     environment:
-      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
-      VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
-      SESSION_SECRET: ${SESSION_SECRET}
+      SUPABASE_URL: ${SUPABASE_URL:?SUPABASE_URL is required}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY is required}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?VITE_SUPABASE_URL is required}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:?VITE_SUPABASE_PUBLISHABLE_KEY is required}
       CHOKIDAR_USEPOLLING: "true"
       CHOKIDAR_INTERVAL: "200"
       NPM_CONFIG_UPDATE_NOTIFIER: "false"
       HOST: 0.0.0.0
       PORT: "3000"
-
 
     volumes:
       - .:/app

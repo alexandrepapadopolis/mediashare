@@ -1,76 +1,85 @@
 // app/utils/session.server.ts
-import { createCookieSessionStorage } from "@remix-run/node";
+import { createCookieSessionStorage, redirect } from "@remix-run/node";
 
-const sessionSecret = process.env.SESSION_SECRET;
+const SESSION_COOKIE_NAME = "__phosio_session";
 
-if (!sessionSecret) {
-  throw new Error("SESSION_SECRET must be set");
+function mustEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env var: ${name}`);
+  return v;
 }
+
+const sessionSecret = mustEnv("SESSION_SECRET");
+
+// Em dev (http://localhost), secure deve ser false, senão o browser ignora o cookie.
+const isProd = process.env.NODE_ENV === "production";
 
 export const sessionStorage = createCookieSessionStorage({
   cookie: {
-    name: "__phosio_session",
+    name: SESSION_COOKIE_NAME,
     httpOnly: true,
     path: "/",
     sameSite: "lax",
     secrets: [sessionSecret],
-    secure: process.env.NODE_ENV === "production",
+    secure: isProd,
   },
 });
 
-export const { getSession, commitSession, destroySession } = sessionStorage;
+export async function getSession(cookieHeader: string | null) {
+  return sessionStorage.getSession(cookieHeader);
+}
 
-export type AuthSessionData = {
-  accessToken?: string;
-  refreshToken?: string;
-  userId?: string;
-};
+export async function commitSession(
+  session: Awaited<ReturnType<typeof getSession>>,
+  opts?: { remember?: boolean }
+) {
+  return sessionStorage.commitSession(session, {
+    maxAge: opts?.remember ? 60 * 60 * 24 * 30 : undefined, // 30 dias se "remember"
+  });
+}
 
-export async function getAuthSession(request: Request) {
-  return getSession(request.headers.get("Cookie"));
+export async function destroySession(session: Awaited<ReturnType<typeof getSession>>) {
+  return sessionStorage.destroySession(session);
 }
 
 export async function getAccessToken(request: Request): Promise<string | null> {
-  const session = await getAuthSession(request);
-  const token = session.get("accessToken");
-  return typeof token === "string" && token.length > 0 ? token : null;
-}
-
-export async function getUserId(request: Request): Promise<string | null> {
-  const session = await getAuthSession(request);
-  const userId = session.get("userId");
-  return typeof userId === "string" && userId.length > 0 ? userId : null;
+  const session = await getSession(request.headers.get("Cookie"));
+  return session.get("accessToken") ?? null;
 }
 
 export async function requireAccessToken(request: Request): Promise<string> {
   const token = await getAccessToken(request);
-  if (!token) throw new Response("Unauthorized", { status: 401 });
+  if (!token) throw redirect("/login");
   return token;
 }
 
+export async function getUserId(request: Request): Promise<string | null> {
+  const session = await getSession(request.headers.get("Cookie"));
+  return session.get("userId") ?? null;
+}
+
+/**
+ * Cria sessão (cookie do Remix) a partir dos tokens do Supabase.
+ * Supabase é apenas IdP; o estado de login da aplicação é o cookie do Remix.
+ */
 export async function createAuthSession(args: {
   request: Request;
   accessToken: string;
-  refreshToken?: string;
-  userId?: string;
-  redirectTo: string;
+  refreshToken?: string | null;
+  userId: string;
+  remember?: boolean;
+  redirectTo?: string;
 }) {
-  const session = await getAuthSession(args.request);
+  const { request, accessToken, refreshToken, userId, remember, redirectTo = "/app" } = args;
 
-  session.set("accessToken", args.accessToken);
-  if (args.refreshToken) session.set("refreshToken", args.refreshToken);
-  if (args.userId) session.set("userId", args.userId);
+  const session = await getSession(request.headers.get("Cookie"));
+  session.set("accessToken", accessToken);
+  session.set("refreshToken", refreshToken ?? null);
+  session.set("userId", userId);
 
-  return new Response(null, {
-    status: 302,
+  return redirect(redirectTo, {
     headers: {
-      Location: args.redirectTo,
-      "Set-Cookie": await commitSession(session),
+      "Set-Cookie": await commitSession(session, { remember }),
     },
   });
-}
-
-export async function logout(request: Request) {
-  const session = await getAuthSession(request);
-  return destroySession(session);
 }

@@ -24,7 +24,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ ok: false, message: "Senha deve ter pelo menos 6 caracteres." }, { status: 400 });
   }
 
-  const supabase = createSupabaseServerClient();
+  const { supabase } = createSupabaseServerClient(request);
   const origin = new URL(request.url).origin;
 
   const { error } = await supabase.auth.signUp({
@@ -69,7 +69,9 @@ export default function SignupRoute() {
 
         <Form method="post" className="space-y-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="username">Nome de usuário (opcional)</label>
+            <label className="text-sm font-medium" htmlFor="username">
+              Nome de usuário (opcional)
+            </label>
             <input
               id="username"
               name="username"
@@ -81,7 +83,9 @@ export default function SignupRoute() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="email">Email</label>
+            <label className="text-sm font-medium" htmlFor="email">
+              Email
+            </label>
             <input
               id="email"
               name="email"
@@ -94,7 +98,9 @@ export default function SignupRoute() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="password">Senha</label>
+            <label className="text-sm font-medium" htmlFor="password">
+              Senha
+            </label>
             <input
               id="password"
               name="password"

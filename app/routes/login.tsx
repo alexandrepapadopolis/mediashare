@@ -3,11 +3,14 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
 import { createSupabaseServerClient } from "../utils/supabase.server";
-import { createAuthSession, getAccessToken } from "../utils/session.server";
+import { createAuthSession, getAccessToken, getUserId } from "../utils/session.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  // Critério de "já autenticado" deve ser o MESMO do /app: accessToken presente
   const token = await getAccessToken(request);
-  if (token) return redirect("/app");
+  const userId = await getUserId(request);
+
+  if (token && userId) return redirect("/app");
   return json({});
 }
 
@@ -15,29 +18,29 @@ export async function action({ request }: ActionFunctionArgs) {
   const form = await request.formData();
   const email = String(form.get("email") || "").trim();
   const password = String(form.get("password") || "");
+  const remember = form.get("remember") === "on";
 
   if (!email || !password) {
     return json({ ok: false, message: "Informe e-mail e senha." }, { status: 400 });
   }
 
-  // sem token aqui
-  const { supabase } = createSupabaseServerClient();
+  const { supabase } = createSupabaseServerClient(request);
 
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
 
-  if (error || !data.session?.access_token) {
-    return json({ ok: false, message: "Credenciais inválidas." }, { status: 401 });
+  if (error || !data?.session || !data?.user) {
+    return json({ ok: false, message: "Credenciais inválidas." }, { status: 400 });
   }
-
-  const accessToken = data.session.access_token;
-  const refreshToken = data.session.refresh_token;
-  const userId = data.user?.id;
 
   return createAuthSession({
     request,
-    accessToken,
-    refreshToken: refreshToken ?? undefined,
-    userId: userId ?? undefined,
+    accessToken: data.session.access_token,
+    refreshToken: data.session.refresh_token,
+    userId: data.user.id,
+    remember,
     redirectTo: "/app",
   });
 }
@@ -97,6 +100,11 @@ export default function LoginRoute() {
             />
           </div>
 
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input type="checkbox" name="remember" className="h-4 w-4" />
+            Manter conectado
+          </label>
+
           <button
             type="submit"
             disabled={busy}
@@ -110,13 +118,6 @@ export default function LoginRoute() {
           Não tem conta?{" "}
           <Link to="/signup" className="font-medium text-foreground underline underline-offset-4">
             Criar conta
-          </Link>
-        </div>
-
-        <div className="mt-3 text-xs text-muted-foreground">
-          Precisa verificar e-mail?{" "}
-          <Link to="/verify-email" className="underline underline-offset-4">
-            Ver instruções
           </Link>
         </div>
       </div>

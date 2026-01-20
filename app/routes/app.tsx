@@ -1,9 +1,8 @@
 // app/routes/app.tsx
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, Link, Outlet, useLoaderData } from "@remix-run/react";
-import { getUserId, getSession, destroySession } from "../utils/session.server";
-import { getAccessToken } from "../utils/session.server";
+import { destroySession, getAccessToken, getSession, getUserId } from "../utils/session.server";
 
 type LoaderData = {
   userId: string | null;
@@ -17,7 +16,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return json<LoaderData>({ userId });
 }
 
-export async function action({ request }: LoaderFunctionArgs) {
+export async function action({ request }: ActionFunctionArgs) {
   const form = await request.formData();
   const intent = String(form.get("intent") || "");
 

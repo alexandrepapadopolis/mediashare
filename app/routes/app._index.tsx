@@ -2,20 +2,23 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import { requireAccessToken } from "../utils/session.server";
-import { createSupabaseServerClient } from "../utils/supabase.server";
+import { destroySession, getSession, requireAccessToken } from "../utils/session.server";
+import { createSupabaseServerClientWithAccessToken } from "../utils/supabase.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const accessToken = await requireAccessToken(request);
 
-  const { supabase } = createSupabaseServerClient({ accessToken });
+  const supabase = createSupabaseServerClientWithAccessToken(accessToken);
 
-  // Exemplo simples: confirma o usuário
+  // Confirma o usuário no GoTrue usando o Bearer token
   const { data, error } = await supabase.auth.getUser();
 
   if (error || !data.user) {
-    // token inválido/expirado: derruba sessão no próximo passo (você pode limpar cookie aqui também)
-    return redirect("/login");
+    // Token inválido/expirado => destrói o cookie Remix para quebrar loop
+    const session = await getSession(request.headers.get("Cookie"));
+    return redirect("/login", {
+      headers: { "Set-Cookie": await destroySession(session) },
+    });
   }
 
   return json({

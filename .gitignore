@@ -30,3 +30,6 @@ Thumbs.db
 .idea/
 supabase/.temp/
 gh-issues.sh
+
+# Supabase local snippets (dev-only)
+supabase/snippets/
