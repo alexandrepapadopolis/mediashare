@@ -6,6 +6,7 @@ import {
   Link,
   isRouteErrorResponse,
   useLoaderData,
+  useLocation,
   useNavigation,
   useRouteError,
 } from "@remix-run/react";
@@ -66,6 +67,10 @@ export default function AppIndexRoute() {
   const navigation = useNavigation();
   const isLoading = navigation.state !== "idle";
 
+  // PR3: preserva a URL de origem (path + query) para o botão "Voltar" no detalhe
+  const location = useLocation();
+  const from = `${location.pathname}${location.search}`;
+
   function buildPageHref(nextPage: number) {
     const params = new URLSearchParams();
 
@@ -77,6 +82,12 @@ export default function AppIndexRoute() {
     params.set("pageSize", String(appliedFilters.pageSize));
 
     return `/app?${params.toString()}`;
+  }
+
+  function buildDetailHref(id: string) {
+    const params = new URLSearchParams();
+    params.set("from", from);
+    return `/app/media/${id}?${params.toString()}`;
   }
 
   return (
@@ -126,7 +137,11 @@ export default function AppIndexRoute() {
           </div>
 
           {/* page reset implícito: não enviar page */}
-          <input type="hidden" name="pageSize" value={String(appliedFilters.pageSize)} />
+          <input
+            type="hidden"
+            name="pageSize"
+            value={String(appliedFilters.pageSize)}
+          />
 
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -213,7 +228,7 @@ export default function AppIndexRoute() {
           : items.map((it) => (
               <Link
                 key={it.id}
-                to={`/app/media/${it.id}`}
+                to={buildDetailHref(it.id)}
                 prefetch="intent"
                 className="block rounded-2xl border bg-white p-4 hover:bg-muted/40"
                 aria-label={`Abrir detalhes: ${it.title ?? "mídia"}`}

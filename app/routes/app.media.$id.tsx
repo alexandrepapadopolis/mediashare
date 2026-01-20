@@ -7,6 +7,7 @@ import {
   Link,
   useLoaderData,
   useRouteError,
+  useSearchParams,
 } from "@remix-run/react";
 
 /**
@@ -63,10 +64,7 @@ async function fetchMediaById(args: {
 
   const url = new URL(`${supabaseUrl}/rest/v1/${MEDIA_RESOURCE}`);
   url.searchParams.set("id", `eq.${args.id}`);
-  url.searchParams.set(
-    "select",
-    "id,title,media_type,created_at,tags"
-  );
+  url.searchParams.set("select", "id,title,media_type,created_at,tags");
   url.searchParams.set("limit", "1");
 
   const response = await fetch(url.toString(), {
@@ -137,30 +135,38 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 /* ===========================
  * UI
  * =========================== */
+function safeFromParam(raw: string | null): string | null {
+  if (!raw) return null;
+
+  // Evita open redirect: aceitamos apenas caminhos internos sob /app
+  if (raw.startsWith("/app")) return raw;
+
+  return null;
+}
+
 export default function MediaDetailRoute() {
   const { media } = useLoaderData<typeof loader>();
+  const [searchParams] = useSearchParams();
+
+  const from = safeFromParam(searchParams.get("from"));
+  const backHref = from ?? "/app";
 
   const tagsText = Array.isArray(media.tags)
     ? media.tags.filter(Boolean).join(", ")
     : typeof media.tags === "string"
-    ? media.tags
-    : "";
+      ? media.tags
+      : "";
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6">
       <div className="mb-4">
-        <Link
-          to="/app"
-          className="text-sm text-blue-600 hover:underline"
-        >
+        <Link to={backHref} className="text-sm text-blue-600 hover:underline">
           Voltar
         </Link>
       </div>
 
       <div className="rounded-lg border bg-white p-5">
-        <h1 className="text-xl font-semibold">
-          {media.title ?? "(sem título)"}
-        </h1>
+        <h1 className="text-xl font-semibold">{media.title ?? "(sem título)"}</h1>
 
         <div className="mt-4 grid gap-2 text-sm">
           <div>
@@ -193,22 +199,21 @@ export default function MediaDetailRoute() {
  * =========================== */
 export function ErrorBoundary() {
   const error = useRouteError();
+  const [searchParams] = useSearchParams();
+
+  const from = safeFromParam(searchParams.get("from"));
+  const backHref = from ?? "/app";
 
   if (isRouteErrorResponse(error)) {
     if (error.status === 404) {
       return (
         <div className="mx-auto max-w-3xl px-4 py-10">
-          <h1 className="text-xl font-semibold">
-            Mídia não encontrada
-          </h1>
+          <h1 className="text-xl font-semibold">Mídia não encontrada</h1>
           <p className="mt-2 text-sm text-gray-700">
             O item solicitado não existe ou você não tem acesso.
           </p>
           <div className="mt-4">
-            <Link
-              to="/app"
-              className="text-sm text-blue-600 hover:underline"
-            >
+            <Link to={backHref} className="text-sm text-blue-600 hover:underline">
               Voltar para a lista
             </Link>
           </div>
@@ -223,7 +228,7 @@ export function ErrorBoundary() {
           {error.status} {error.statusText}
         </p>
         <Link
-          to="/app"
+          to={backHref}
           className="mt-4 inline-block text-sm text-blue-600 hover:underline"
         >
           Voltar
@@ -236,11 +241,10 @@ export function ErrorBoundary() {
     <div className="mx-auto max-w-3xl px-4 py-10">
       <h1 className="text-xl font-semibold">Erro inesperado</h1>
       <p className="mt-2 text-sm text-gray-700">
-        {(error as Error)?.message ??
-          "Falha ao carregar o detalhe da mídia."}
+        {(error as Error)?.message ?? "Falha ao carregar o detalhe da mídia."}
       </p>
       <Link
-        to="/app"
+        to={backHref}
         className="mt-4 inline-block text-sm text-blue-600 hover:underline"
       >
         Voltar
