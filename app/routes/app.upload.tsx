@@ -396,7 +396,7 @@ export default function AppUploadRoute() {
                     </div>
                 ) : null}
 
-                <Form method="post" className="space-y-6">
+                <Form method="post" encType="multipart/form-data" className="space-y-6">
 
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div className="sm:col-span-2">
@@ -433,6 +433,7 @@ export default function AppUploadRoute() {
                             >
                                 <option value="photo">Foto</option>
                                 <option value="video">Vídeo</option>
+                                <option value="audio">Áudio</option>
                             </select>
                             {actionData?.ok === false && actionData.fieldErrors?.mediaType ? <p className="mt-2 text-xs text-rose-700">{actionData.fieldErrors.mediaType}</p> : null}
                         </div>
@@ -471,10 +472,21 @@ export default function AppUploadRoute() {
                         />
                     </div>
 
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-sm font-medium text-slate-900">Arquivo</p>
-                        <p className="mt-1 text-sm text-slate-600">
-                            Upload binário ainda não habilitado neste PR. Este formulário prepara o fluxo de metadados.
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
+                        <p className="text-sm font-medium text-slate-900">Arquivos</p>
+                        <p className="text-sm text-slate-600">
+                            Selecione um ou mais arquivos (imagem, vídeo ou áudio). Máximo: 1GB por arquivo.
+                        </p>
+                        <input
+                            id="files"
+                            name="files"
+                            type="file"
+                            multiple
+                            accept="image/*,video/*,audio/*"
+                            className="block w-full text-sm text-slate-700 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-800"
+                        />
+                        <p className="text-xs text-slate-500">
+                            Os arquivos serão enviados pelo servidor (SSR) e vinculados ao draft desta mídia.
                         </p>
                     </div>
 
@@ -491,7 +503,7 @@ export default function AppUploadRoute() {
                             disabled={!canContinue || isSubmitting}
                             className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                            {isSubmitting ? "Salvando..." : "Continuar"}
+                            {isSubmitting ? "Enviando..." : "Enviar"}
                         </button>
                     </div>
                 </Form>
