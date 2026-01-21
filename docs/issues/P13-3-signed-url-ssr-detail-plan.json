@@ -1,0 +1,104 @@
+{
+    "issue_proposal": {
+        "epic_parent": 33,
+        "key": "P13-3",
+        "suggested_title": "P13-3: Exibição e download seguro via SSR (signed URLs) + integração em /app/media/:id",
+        "suggested_labels": [
+            "phosio",
+            "backend",
+            "frontend",
+            "remix",
+            "supabase"
+        ],
+        "suggested_body": "Sub-issue do épico #33.\n\nObjetivo:\n- Habilitar exibição e download do binário armazenado no Supabase Storage (bucket privado \"media\") de forma segura, sem expor tokens no browser.\n\nEscopo:\n- Gerar Signed URL exclusivamente no server (Remix loader/action), usando o accessToken do usuário armazenado na sessão (cookie httpOnly)\n- Consumir a Signed URL na página SSR protegida /app/media/:id\n- Opção de download (link/botão) usando Signed URL gerada no server\n- TTL configurável (padrão sugerido: 60s a 300s) para Signed URLs\n- Tratamento de erro:\n  - se token inválido: destroySession + redirect /login (padrão existente)\n  - se objeto não existir/sem permissão: mostrar estado de erro consistente\n\nFora de escopo:\n- Thumbnail/processing (isso poderá ser um P13-4)\n- CDN pública\n- Compartilhamento público\n- Upload (já entregue no P13-2)\n\nPremissas técnicas (já consolidadas):\n- Remix 2.x SSR/MPA\n- Sessão via cookie httpOnly; nenhum token no browser\n- Bucket privado \"media\" com RLS por owner\n- Path no Storage: <auth.uid()>/<mediaId>/<filename>\n- Draft/registro em public.media já contém storage_bucket e storage_object_path"
+    },
+    "repo_context": {
+        "local_windows_path": "E:\\GitHub\\mediashare",
+        "local_git_bash_path": "/e/GitHub/mediashare",
+        "dev_environment": {
+            "os": "Windows 11",
+            "shell": "Git Bash (MINGW64)",
+            "docker_dev": true,
+            "container_mount": "/app",
+            "restart_cmd": "docker restart phosio-app-dev"
+        }
+    },
+    "inputs_required_from_user": [
+        {
+            "path": "app/routes/app.media.$id.tsx",
+            "why_needed": "Confirmar como a página /app/media/:id carrega e renderiza dados hoje (loader/UI), para integrar a geração/consumo de Signed URL sem quebrar o SSR e sem suposições."
+        },
+        {
+            "path": "app/utils/session.server.ts",
+            "why_needed": "Validar o fluxo atual de token/sessão e reaproveitar require/getAccessToken sem alterar auth/session (premissa fixa). (Você já colou antes; se não mudou, apenas confirmar que permanece igual.)"
+        },
+        {
+            "path": "app/utils/env.server.ts",
+            "why_needed": "Confirmar variáveis existentes para compor endpoints do Supabase (VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY) e evitar inventar chaves."
+        },
+        {
+            "path": "app/routes/logout.tsx",
+            "why_needed": "Verificar padrão de destroySession + redirect já aplicado no projeto, para reutilizar nos erros de token inválido."
+        }
+    ],
+    "plan": {
+        "overview": "Implementar acesso seguro ao binário no Supabase Storage por meio de Signed URLs geradas exclusivamente no server (SSR). A página /app/media/:id passará a solicitar a URL assinada no loader (ou endpoint SSR dedicado), renderizando preview quando aplicável e oferecendo botão de download, sem expor accessToken no browser.",
+        "prs": [
+            {
+                "pr": "PR1",
+                "branch": "feature/<issue>-p13-3-signed-url-ssr",
+                "scope": "Gerar Signed URL no server e integrar em /app/media/:id",
+                "responsibilities": [
+                    "Ler storage_bucket e storage_object_path do registro public.media no loader de /app/media/:id",
+                    "Gerar Signed URL no server via Supabase Storage REST (endpoint oficial) usando Authorization: Bearer <accessToken>",
+                    "Configurar TTL de Signed URL (padrão sugerido 120s) e expor apenas a URL assinada ao client",
+                    "Renderizar preview básico na UI quando aplicável (imagem, e eventualmente áudio/vídeo com controles) usando a URL assinada",
+                    "Adicionar botão/link de download usando a URL assinada",
+                    "Garantir tratamento de token inválido: destroySession + redirect /login (padrão do projeto)",
+                    "Garantir que nenhum token seja enviado ao browser"
+                ],
+                "files_to_change": [
+                    "app/routes/app.media.$id.tsx"
+                ],
+                "sql_to_run_in_supabase_studio": [],
+                "commit_sequence": [
+                    "feat(p13): signed URL SSR para mídia em /app/media/:id (Refs #<issue>)",
+                    "feat(p13): finalizar exibição/download seguro via signed URL (Closes #<issue>)"
+                ],
+                "git_commands": {
+                    "branch": [
+                        "cd /e/GitHub/mediashare",
+                        "git checkout main",
+                        "git pull origin main",
+                        "git checkout -b feature/<issue>-p13-3-signed-url-ssr"
+                    ],
+                    "commit": [],
+                    "push": [],
+                    "pr_create": []
+                }
+            }
+        ]
+    },
+    "acceptance_criteria": [
+        "A página /app/media/:id (SSR protegido) consegue exibir ou oferecer download do binário via Signed URL gerada no server",
+        "A Signed URL tem TTL curto configurável (ex.: 60-300s) e é gerada apenas no server",
+        "Nenhum accessToken/refreshToken é exposto ao browser (sem localStorage/sessionStorage e sem envio em payloads)",
+        "Se token inválido: destroySession + redirect para /login",
+        "Se storage_object_path ausente no registro: UI apresenta estado consistente (ex.: \"arquivo ainda não enviado\" ou erro controlado)",
+        "Se objeto no Storage não existir ou permissão negar: UI apresenta erro controlado sem quebrar SSR"
+    ],
+    "risks": [
+        "Dependência de endpoint oficial de Signed URL do Supabase Storage (ajustar conforme versão/rota local); deve ser validado no ambiente local",
+        "TTL curto pode expirar durante uso prolongado (especialmente vídeos/áudios); pode exigir regeneração em nova navegação/reload",
+        "Preview de vídeo/áudio pode exigir headers/range; pode ser limitado no Storage local dependendo de configuração"
+    ],
+    "docs_issue_file_suggestion": {
+        "path": "docs/issues/P13-3-signed-url-ssr-detail-plan.json",
+        "why": "Mantém o mesmo padrão de nomenclatura usado em P13-1 e P13-2: P13-<n>-<descricao-curta>-detail-plan.json"
+    },
+    "gh_issue_create_suggestion": {
+        "labels_to_use": "phosio,backend,frontend,remix,supabase",
+        "labels_to_avoid": "storage (label não existe no repositório)",
+        "command_template": "cd /e/GitHub/mediashare\n\ngh issue create \\\n  -R alexandrepapadopolis/mediashare \\\n  -t \"P13-3: Exibição e download seguro via SSR (signed URLs)\" \\\n  -b \"Sub-issue do épico #33.\n\nEscopo:\n- Gerar Signed URL exclusivamente no server (SSR) para objetos no bucket privado 'media'\n- Integrar na rota protegida /app/media/:id\n- Preview quando aplicável e botão/link de download\n- TTL curto (ex.: 120s)\n- Token inválido: destroySession + redirect /login\n\nFora de escopo:\n- Thumbnail/processing\n- CDN pública\n- Compartilhamento público\" \\\n  -l \"phosio,backend,frontend,remix,supabase\""
+    }
+}
