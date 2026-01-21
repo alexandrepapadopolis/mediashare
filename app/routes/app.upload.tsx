@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import type { ActionFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useLocation, useNavigate, useNavigation } from "@remix-run/react";
+import { createHash } from "node:crypto";
+import { Readable, Transform } from "node:stream";
 import { getEnv } from "../utils/env.server";
 import { getAccessToken, getUserId } from "../utils/session.server";
 
@@ -9,8 +11,86 @@ type ActionData =
     | { ok: true; id: string }
     | { ok: false; formError?: string; fieldErrors?: Record<string, string>; postgrestError?: string };
 
-function isValidMediaType(value: string): value is "photo" | "video" {
-    return value === "photo" || value === "video";
+function isValidMediaType(value: string): value is "photo" | "video" | "audio" {
+    return value === "photo" || value === "video" || value === "audio";
+}
+
+function isAllowedMime(mime: string): boolean {
+    return mime.startsWith("image/") || mime.startsWith("video/") || mime.startsWith("audio/");
+}
+
+const MAX_BYTES_PER_FILE = 1024 * 1024 * 1024; // 1GB
+
+function safeFilename(name: string): string {
+    const base = name.split("/").pop()?.split("\\").pop() ?? "file";
+    const cleaned = base.replace(/\s+/g, "_").trim();
+    return cleaned.length ? cleaned : "file";
+}
+
+function encodePathSegments(segments: string[]): string {
+    return segments.map((s) => encodeURIComponent(s)).join("/");
+}
+
+async function uploadToSupabaseStorage(args: {
+    supabaseUrl: string;
+    supabaseAnonKey: string;
+    accessToken: string;
+    bucket: string;
+    objectPath: string; // URL-encoded segments joined by "/"
+    file: File;
+}): Promise<{
+    checksum_sha256: string;
+    size_bytes: number;
+    mime_type: string;
+    original_filename: string;
+}> {
+    const { supabaseUrl, supabaseAnonKey, accessToken, bucket, objectPath, file } = args;
+
+    const mime = file.type || "application/octet-stream";
+    const size = file.size ?? 0;
+    const original = file.name || "file";
+
+    const hash = createHash("sha256");
+    const hasher = new Transform({
+        transform(chunk, _enc, cb) {
+            hash.update(chunk as Buffer);
+            cb(null, chunk);
+        },
+    });
+
+    const nodeReadable = Readable.fromWeb(file.stream() as unknown as ReadableStream);
+    const bodyStream = nodeReadable.pipe(hasher);
+
+    const url = `${supabaseUrl}/storage/v1/object/${bucket}/${objectPath}`;
+    const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": mime,
+        },
+        // @ts-expect-error Node fetch requer duplex para request streaming
+        duplex: "half",
+        body: bodyStream as unknown as BodyInit,
+    });
+
+    if (!resp.ok) {
+        let details = "";
+        try {
+            const j = await resp.json();
+            details = typeof j === "string" ? j : JSON.stringify(j);
+        } catch {
+            details = await resp.text().catch(() => "");
+        }
+        throw new Error(`Storage ${resp.status}: ${details}`);
+    }
+
+    return {
+        checksum_sha256: hash.digest("hex"),
+        size_bytes: size,
+        mime_type: mime,
+        original_filename: original,
+    };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -90,7 +170,149 @@ export async function action({ request }: ActionFunctionArgs) {
         return json<ActionData>({ ok: false, postgrestError: "Resposta inesperada do PostgREST (id ausente)." }, { status: 502 });
     }
 
-    return json<ActionData>({ ok: true, id }, { status: 200 });
+    // ---- P13-2: upload binário + update draft + redirect ----
+    const fileEntries = formData.getAll("files");
+    const files = fileEntries.filter((v): v is File => v instanceof File);
+
+    if (!files.length) {
+        return json<ActionData>({ ok: false, formError: "Selecione ao menos um arquivo para enviar." }, { status: 400 });
+    }
+
+    for (const f of files) {
+        const mime = f.type || "";
+        if (!isAllowedMime(mime)) {
+            return json<ActionData>(
+                { ok: false, formError: `Tipo de arquivo não permitido: ${mime || "(vazio)"}` },
+                { status: 400 }
+            );
+        }
+        const size = f.size ?? 0;
+        if (size <= 0) {
+            return json<ActionData>(
+                { ok: false, formError: `Arquivo inválido (tamanho zero): ${f.name || "(sem nome)"}` },
+                { status: 400 }
+            );
+        }
+        if (size > MAX_BYTES_PER_FILE) {
+            return json<ActionData>(
+                { ok: false, formError: `Arquivo excede 1GB: ${f.name || "(sem nome)"}` },
+                { status: 400 }
+            );
+        }
+    }
+
+    const bucket = "media";
+    const directoryRel = `${userId}/${id}`;
+    const nowIso = new Date().toISOString();
+
+    // Carregar metadata atual para merge seguro (sem sobrescrever defaults)
+    let currentMetadata: unknown = {};
+    try {
+        const metaResp = await fetch(`${supabaseUrl}/rest/v1/media?id=eq.${id}&select=metadata`, {
+            method: "GET",
+            headers: {
+                apikey: supabaseAnonKey,
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+            },
+        });
+        if (metaResp.ok) {
+            const rows = (await metaResp.json()) as Array<{ metadata: unknown }>;
+            currentMetadata = rows?.[0]?.metadata ?? {};
+        }
+    } catch {
+        currentMetadata = {};
+    }
+
+    const uploadedFiles: Array<{
+        bucket: string;
+        path: string;
+        original_filename: string;
+        mime_type: string;
+        size_bytes: number;
+        checksum_sha256: string;
+        uploaded_at: string;
+    }> = [];
+
+    try {
+        for (const f of files) {
+            const filename = safeFilename(f.name || "file");
+            const objectPath = encodePathSegments([userId, id, filename]);
+
+            const uploaded = await uploadToSupabaseStorage({
+                supabaseUrl,
+                supabaseAnonKey,
+                accessToken,
+                bucket,
+                objectPath,
+                file: f,
+            });
+
+            uploadedFiles.push({
+                bucket,
+                path: `${userId}/${id}/${filename}`,
+                original_filename: uploaded.original_filename,
+                mime_type: uploaded.mime_type,
+                size_bytes: uploaded.size_bytes,
+                checksum_sha256: uploaded.checksum_sha256,
+                uploaded_at: nowIso,
+            });
+        }
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return json<ActionData>(
+            { ok: false, postgrestError: `Falha no upload para Storage: ${msg}` },
+            { status: 502 }
+        );
+    }
+
+    const primary = uploadedFiles[0];
+    const mergedMetadata =
+        typeof currentMetadata === "object" && currentMetadata !== null
+            ? { ...(currentMetadata as Record<string, unknown>), files: uploadedFiles }
+            : { files: uploadedFiles };
+
+    const patchPayload = {
+        storage_bucket: bucket,
+        storage_object_path: primary.path,
+        directory_relpath: directoryRel,
+        file_path: primary.path,
+        original_filename: primary.original_filename,
+        mime_type: primary.mime_type,
+        size_bytes: primary.size_bytes,
+        checksum_sha256: primary.checksum_sha256,
+        fs_created_at: nowIso,
+        fs_modified_at: nowIso,
+        uploaded_at: nowIso,
+        metadata: mergedMetadata,
+    };
+
+    const patchResp = await fetch(`${supabaseUrl}/rest/v1/media?id=eq.${id}`, {
+        method: "PATCH",
+        headers: {
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+            Prefer: "return=representation",
+        },
+        body: JSON.stringify(patchPayload),
+    });
+
+    if (!patchResp.ok) {
+        let details = "";
+        try {
+            const j = await patchResp.json();
+            details = typeof j === "string" ? j : JSON.stringify(j);
+        } catch {
+            details = await patchResp.text().catch(() => "");
+        }
+        return json<ActionData>(
+            { ok: false, postgrestError: `PostgREST (PATCH) ${patchResp.status}: ${details}` },
+            { status: patchResp.status }
+        );
+    }
+
+    return redirect(`/app/media/${id}`);
 }
 
 export const meta: MetaFunction = () => {
@@ -100,7 +322,7 @@ export const meta: MetaFunction = () => {
     ];
 };
 
-type MediaType = "photo" | "video";
+type MediaType = "photo" | "video" | "audio";
 
 type FormState = {
     title: string;
