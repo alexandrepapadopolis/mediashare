@@ -1,7 +1,7 @@
 // app/utils/auth.server.ts
 import { redirect, json } from "@remix-run/node";
 import { createSupabaseServerClient } from "./supabase.server";
-import { clearSupabaseTokens, getSupabaseTokens, setSupabaseTokens } from "./session.server";
+import { createAuthSession, destroySession, getAccessToken, getSession } from "./session.server";
 import { getEnv } from "./env.server";
 
 // Login email/senha (server action)
@@ -15,13 +15,13 @@ export async function signInWithPassword(request: Request, email: string, passwo
       { status: 400 }
     );
   }
-
-  const { setCookie } = await setSupabaseTokens(request, {
-    access_token: data.session.access_token,
-    refresh_token: data.session.refresh_token,
+  return createAuthSession({
+    request,
+    accessToken: data.session.access_token,
+    refreshToken: data.session.refresh_token,
+    userId: data.session.user.id,
+    redirectTo: "/app",
   });
-
-  return redirect("/app", { headers: { "Set-Cookie": setCookie } });
 }
 
 // Signup email/senha + redirect de confirmação
@@ -51,14 +51,15 @@ export async function signUpWithEmail(request: Request, email: string, password:
 
 // Logout (server action)
 export async function signOut(request: Request) {
-  // Não depende de chamar supabase.auth.signOut porque estamos guardando tokens no cookie.
-  const { setCookie } = await clearSupabaseTokens(request);
-  return redirect("/", { headers: { "Set-Cookie": setCookie } });
+  const session = await getSession(request.headers.get("Cookie"));
+  return redirect("/", {
+    headers: { "Set-Cookie": await destroySession(session) },
+  });
 }
 
 // Valida sessão do usuário via Supabase usando access token
 export async function getUserFromRequest(request: Request) {
-  const { accessToken } = await getSupabaseTokens(request);
+  const accessToken = await getAccessToken(request);
   if (!accessToken) return null;
 
   const supabase = createSupabaseServerClient({ accessToken });

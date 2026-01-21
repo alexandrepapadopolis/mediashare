@@ -1,6 +1,97 @@
 import { useMemo, useState } from "react";
-import type { MetaFunction } from "@remix-run/node";
-import { useLocation, useNavigate } from "@remix-run/react";
+import type { ActionFunctionArgs, MetaFunction } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { Form, useActionData, useLocation, useNavigate, useNavigation } from "@remix-run/react";
+import { getEnv } from "../utils/env.server";
+import { getAccessToken, getUserId } from "../utils/session.server";
+
+type ActionData =
+    | { ok: true; id: string }
+    | { ok: false; formError?: string; fieldErrors?: Record<string, string>; postgrestError?: string };
+
+function isValidMediaType(value: string): value is "photo" | "video" {
+    return value === "photo" || value === "video";
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+    const accessToken = await getAccessToken(request);
+    if (!accessToken) {
+        return json<ActionData>({ ok: false, formError: "Token ausente. Faça login novamente." }, { status: 401 });
+    }
+
+    const userId = await getUserId(request);
+    if (!userId) {
+        return json<ActionData>({ ok: false, formError: "Sessão inválida. Faça login novamente." }, { status: 401 });
+    }
+
+    const formData = await request.formData();
+    const title = String(formData.get("title") ?? "");
+    const description = String(formData.get("description") ?? "");
+    const mediaTypeRaw = String(formData.get("mediaType") ?? "");
+    const tagsCsv = String(formData.get("tagsCsv") ?? "");
+
+    const fieldErrors: Record<string, string> = {};
+    if (!isValidTitle(title)) fieldErrors.title = "Título deve ter no mínimo 3 caracteres.";
+    if (!isValidMediaType(mediaTypeRaw)) fieldErrors.mediaType = "Tipo inválido.";
+
+    if (Object.keys(fieldErrors).length) {
+        return json<ActionData>({ ok: false, fieldErrors }, { status: 400 });
+    }
+
+    const tags = normalizeTags(tagsCsv);
+
+    const env = getEnv();
+    const supabaseUrl = env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    if (!supabaseUrl || !supabaseAnonKey) {
+        return json<ActionData>(
+            { ok: false, formError: "Configuração ausente: VITE_SUPABASE_URL/VITE_SUPABASE_PUBLISHABLE_KEY." },
+            { status: 500 }
+        );
+    }
+
+    const payload = {
+        user_id: userId,
+        title: title.trim(),
+        description: description.trim() || null,
+        media_type: mediaTypeRaw,
+        source_type: "file",
+        tags,
+    };
+
+    const resp = await fetch(`${supabaseUrl}/rest/v1/media`, {
+        method: "POST",
+        headers: {
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+            Prefer: "return=representation",
+        },
+        body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+        let details = "";
+        try {
+            const j = await resp.json();
+            details = typeof j === "string" ? j : JSON.stringify(j);
+        } catch {
+            details = await resp.text().catch(() => "");
+        }
+        return json<ActionData>(
+            { ok: false, postgrestError: `PostgREST ${resp.status}: ${details}` },
+            { status: resp.status }
+        );
+    }
+
+    const created = (await resp.json()) as Array<{ id: string }>;
+    const id = created?.[0]?.id;
+    if (!id) {
+        return json<ActionData>({ ok: false, postgrestError: "Resposta inesperada do PostgREST (id ausente)." }, { status: 502 });
+    }
+
+    return json<ActionData>({ ok: true, id }, { status: 200 });
+}
 
 export const meta: MetaFunction = () => {
     return [
@@ -41,6 +132,9 @@ export default function AppUploadRoute() {
     const navigate = useNavigate();
     const location = useLocation();
     const search = location.search || "";
+    const actionData = useActionData<ActionData>();
+    const navigation = useNavigation();
+    const isSubmitting = navigation.state === "submitting";
     const [form, setForm] = useState<FormState>({
         title: "",
         description: "",
@@ -64,7 +158,24 @@ export default function AppUploadRoute() {
             </header>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
+                {actionData?.ok === false && (actionData.formError || actionData.postgrestError) ? (
+                    <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                        {actionData.formError ? <p>{actionData.formError}</p> : null}
+                        {actionData.postgrestError ? <p className="mt-1 break-words">{actionData.postgrestError}</p> : null}
+                    </div>
+                ) : null}
+
+                {actionData?.ok === true ? (
+                    <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+                        <p>Mídia criada com sucesso (draft lógico).</p>
+                        <p className="mt-1">
+                            ID: <span className="font-mono">{actionData.id}</span>
+                        </p>
+                    </div>
+                ) : null}
+
+                <Form method="post" className="space-y-6">
+
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div className="sm:col-span-2">
                             <label htmlFor="title" className="block text-sm font-medium text-slate-900">
@@ -81,6 +192,7 @@ export default function AppUploadRoute() {
                                 aria-invalid={!titleOk}
                                 aria-describedby="title-help"
                             />
+                            {actionData?.ok === false && actionData.fieldErrors?.title ? <p className="mt-2 text-xs text-rose-700">{actionData.fieldErrors.title}</p> : null}
                             <p id="title-help" className="mt-2 text-xs text-slate-600">
                                 Mínimo de 3 caracteres.
                             </p>
@@ -100,6 +212,7 @@ export default function AppUploadRoute() {
                                 <option value="photo">Foto</option>
                                 <option value="video">Vídeo</option>
                             </select>
+                            {actionData?.ok === false && actionData.fieldErrors?.mediaType ? <p className="mt-2 text-xs text-rose-700">{actionData.fieldErrors.mediaType}</p> : null}
                         </div>
 
                         <div>
@@ -108,7 +221,7 @@ export default function AppUploadRoute() {
                             </label>
                             <input
                                 id="tags"
-                                name="tags"
+                                name="tagsCsv"
                                 type="text"
                                 value={form.tagsCsv}
                                 onChange={(e) => setForm((p) => ({ ...p, tagsCsv: e.target.value }))}
@@ -152,21 +265,18 @@ export default function AppUploadRoute() {
                             Cancelar
                         </button>
                         <button
-                            type="button"
-                            disabled={!canContinue}
+                            type="submit"
+                            disabled={!canContinue || isSubmitting}
                             className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
-                            onClick={() => {
-                                // UI-only: no-op
-                            }}
                         >
-                            Continuar
+                            {isSubmitting ? "Salvando..." : "Continuar"}
                         </button>
                     </div>
-                </form>
+                </Form>
             </div>
 
             <footer className="mt-6 text-xs text-slate-500">
-                P09-1 (Issue #27): UI SSR inicial. Próximos PRs: action SSR + PostgREST (draft) e refinamentos de navegação/UX.
+                P09-2 (Issue #28): action SSR + PostgREST criando draft lógico (sem upload binário).
             </footer>
         </div>
     );
