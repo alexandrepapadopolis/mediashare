@@ -1,0 +1,187 @@
+{
+    "revision_basis": {
+        "inputs_used": [
+            "Contexto fixo fornecido anteriormente (Windows 11 + Git Bash + Docker dev; Supabase local; decisões fechadas; padrões de branch/commit/merge).",
+            "Arquivo ZIP anexado (mediashare.zip), incluindo a existência de docs/issues/P08-media-detail-plan.json e docs/issues/P09-secure-routes-detail-plan.json.",
+            "Saída real do comando `supabase status` (Supabase local rodando; Storage S3 endpoint e chaves disponíveis; serviços opcionais parados; versões CLI)."
+        ],
+        "constraints_reasserted": [
+            "P13-1: apenas Storage/policies + documentação mínima no repo; não implementar upload no app (P13-2).",
+            "Não alterar auth/sessão existente.",
+"Comandos git/gh sempre a partir de /e/GitHub/mediashare (repo Windows em E:\GitHub\mediashare).",
+            "Não sugerir npm no host; somente dentro do container se necessário (não é necessário em P13-1).",
+            "Não versionar segredos/chaves (mesmo que apareçam no `supabase status`)."
+        ]
+    },
+    "plan_revised": {
+        "issue_proposal": {
+            "epic_parent": 33,
+            "key": "P13-1",
+            "suggested_title": "P13-1: Supabase Storage — bucket privado "media" + RLS policies por owner (SSR-ready)",
+            "suggested_labels": [
+                "phosio",
+                "epic",
+                "backend",
+                "supabase",
+                "storage",
+                "security",
+                "rls",
+                "p13"
+            ],
+            "suggested_body": "Escopo: criar bucket privado "media" no Supabase Storage local e aplicar policies (RLS) para permitir upload apenas por usuário autenticado (somente no prefixo do próprio uid) e permitir leitura/remoção/alteração apenas pelo owner. Incluir documentação mínima em docs/issues. Fora de escopo: implementar upload binário no app (P13-2). Ambiente: Windows 11 + Git Bash (MINGW64) + Docker dev; repo em E:\GitHub\mediashare (/e/GitHub/mediashare)."
+        },
+        "repo_context": {
+            "local_windows_path": "E:\GitHub\mediashare",
+            "local_git_bash_path": "/e/GitHub/mediashare",
+            "dev_environment": {
+                "os": "Windows 11",
+                "shell": "Git Bash (MINGW64)",
+                "docker_dev": true,
+                "container_mount": "/app",
+                "restart_cmd": "docker restart phosio-app-dev"
+            },
+            "supabase_local_status": {
+                "supabase_cli_current": "v2.67.1",
+                "supabase_cli_update_available": "v2.72.7",
+                "running": true,
+                "studio": "[http://127.0.0.1:54323](http://127.0.0.1:54323)",
+                "project_url_host": "[http://127.0.0.1:54321](http://127.0.0.1:54321)",
+                "rest_host": "[http://127.0.0.1:54321/rest/v1](http://127.0.0.1:54321/rest/v1)",
+                "db_url": "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+                "storage_s3": {
+                    "s3_url": "[http://127.0.0.1:54321/storage/v1/s3](http://127.0.0.1:54321/storage/v1/s3)",
+                    "region": "local",
+                    "note": "Não versionar Access Key/Secret Key; usar apenas em runtime/ambiente quando necessário. P13-1 não precisa dessas chaves."
+                },
+                "stopped_optional_services": [
+                    "supabase_imgproxy_phosio",
+                    "supabase_analytics_phosio",
+                    "supabase_vector_phosio",
+                    "supabase_pooler_phosio"
+                ]
+            }
+        },
+        "inputs_required_from_user": [
+            {
+                "path": "Nenhum arquivo adicional é necessário para criar bucket/policies (P13-1).",
+                "why_needed": "O plano revisado foi ajustado com base no ZIP e no `supabase status`. A execução da parte de Storage/policies ocorre via Supabase Studio e SQL Editor, e a documentação mínima será criada como novo arquivo em docs/issues."
+            }
+        ],
+        "plan": {
+            "overview": "Criar bucket privado "media" via Supabase Studio (UI) no Supabase local já rodando e aplicar RLS policies em storage.objects (insert/select/delete/update) restritas a authenticated e owner_id=auth.uid(), com convenção obrigatória de path "<uid>/<mediaId>/<filename>". Documentar no repositório em docs/issues no formato JSON (novo arquivo), sem incluir segredos do `supabase status`.",
+            "prs": [
+                {
+                    "pr": "PR1",
+                    "branch": "feature/<issue>-p13-1-storage-media-bucket-rls",
+                    "scope": "Storage/policies: bucket privado "media" + RLS policies por owner + documentação mínima em docs/issues (sem mudanças no app).",
+                    "responsibilities": [
+                        "Criar bucket privado "media" no Supabase Studio (Storage UI).",
+                        "Aplicar policies em storage.objects (insert/select/delete/update) para bucket_id='media' e owner_id=auth.uid().",
+                        "Impor prefixo por usuário no INSERT/UPDATE via (storage.foldername(name))[1] = auth.uid()::text.",
+                        "Adicionar documentação mínima versionada em docs/issues (novo arquivo JSON), incluindo passos no Studio, SQL e verificação.",
+                        "Não alterar auth/session; não implementar upload binário no app (P13-2)."
+                    ],
+                    "files_to_change": [
+                        "docs/issues/P13-1-storage-media-bucket-detail-plan.json"
+                    ],
+                    "supabase_studio_steps": [
+                        {
+                            "step": "Criar bucket privado",
+                            "where": "Supabase Studio ([http://127.0.0.1:54323](http://127.0.0.1:54323)) -> Storage",
+                            "actions": [
+                                "Create bucket",
+                                "Name: media",
+                                "Privacy: Private (public=false)"
+                            ]
+                        },
+                        {
+                            "step": "Aplicar policies (RLS)",
+                            "where": "Supabase Studio ([http://127.0.0.1:54323](http://127.0.0.1:54323)) -> SQL Editor",
+                            "actions": [
+                                "Executar o SQL 'P13-1 — Policies storage.objects' abaixo.",
+                                "Opcionalmente executar 'P13-1 — buckets select policy' (apenas metadata) se for útil para fluxos autenticados futuros."
+                            ]
+                        }
+                    ],
+                    "sql_to_run_in_supabase_studio": [
+                        {
+                            "name": "P13-1 — Policies storage.objects (bucket media, private, owner-based)",
+                            "sql": "begin;\n\n-- Pré-requisito: criar o bucket "media" como Private via Supabase Studio (Storage UI).\n-- Convenção obrigatória de path em storage.objects.name:\n--   "<auth.uid()>/<mediaId>/<filename>"\n\n-- INSERT (upload): apenas authenticated; somente no prefixo do próprio uid; owner_id deve ser o próprio uid\ncreate policy "phosio_media_insert_own_prefix"\non storage.objects\nfor insert\nto authenticated\nwith check (\n  bucket_id = 'media'\n  and (storage.foldername(name))[1] = auth.uid()::text\n  and owner_id = auth.uid()::text\n);\n\n-- SELECT (read/download/list): apenas owner\ncreate policy "phosio_media_select_owner"\non storage.objects\nfor select\nto authenticated\nusing (\n  bucket_id = 'media'\n  and owner_id = auth.uid()::text\n);\n\n-- DELETE (remove): apenas owner\ncreate policy "phosio_media_delete_owner"\non storage.objects\nfor delete\nto authenticated\nusing (\n  bucket_id = 'media'\n  and owner_id = auth.uid()::text\n);\n\n-- UPDATE (rename/move/metadata): apenas owner; mantém prefixo do próprio uid\ncreate policy "phosio_media_update_owner"\non storage.objects\nfor update\nto authenticated\nusing (\n  bucket_id = 'media'\n  and owner_id = auth.uid()::text\n)\nwith check (\n  bucket_id = 'media'\n  and owner_id = auth.uid()::text\n  and (storage.foldername(name))[1] = auth.uid()::text\n);\n\ncommit;\n"
+                        },
+                        {
+                            "name": "P13-1 — (Opcional) Policy storage.buckets select (metadata do bucket media)",
+                            "sql": "begin;\n\n-- Opcional: permite que usuários autenticados leiam metadata do bucket "media".\ncreate policy "phosio_buckets_select_media_authenticated"\non storage.buckets\nfor select\nto authenticated\nusing (\n  id = 'media'\n);\n\ncommit;\n"
+                        }
+                    ],
+                    "verification": {
+                        "ui_checks": [
+                            "Storage UI: bucket 'media' existe e está Private (public=false)."
+                        ],
+                        "sql_checks": [
+                            {
+                                "name": "Listar policies storage",
+                                "sql": "select schemaname, tablename, policyname, permissive, roles, cmd\nfrom pg_policies\nwhere schemaname = 'storage'\n  and tablename in ('objects','buckets')\norder by tablename, policyname;"
+                            }
+                        ]
+                    },
+                    "commit_sequence": [
+                        "feat(p13): criar policies RLS do bucket media e doc mínima (Refs #<issue>)",
+                        "feat(p13): finalizar P13-1 (Closes #<issue>)"
+                    ],
+                    "git_commands": {
+                        "branch": [
+                            "cd /e/GitHub/mediashare",
+                            "git checkout main",
+                            "git pull origin main",
+                            "gh issue create -R alexandrepapadopolis/mediashare -t "P13-1: Supabase Storage — bucket privado \"media\" + RLS policies por owner (SSR-ready)" -b "Escopo: criar bucket privado 'media' no Supabase Storage local e aplicar policies (RLS) para permitir upload apenas por usuário autenticado (somente no prefixo do próprio uid) e leitura/remoção/alteração apenas pelo owner. Incluir documentação mínima em docs/issues. Fora de escopo: upload binário no app (P13-2). Ambiente: Windows 11 + Git Bash + Docker dev; repo em E:\\GitHub\\mediashare (/e/GitHub/mediashare)." -l "phosio,epic,backend,supabase,storage,security,rls,p13"","export ISSUE=<substitua_pelo_numero_criado>",
+                            "git checkout -b feature/$ISSUE-p13-1-storage-media-bucket-rls"
+                        ],
+                        "commit": [
+                            "cd /e/GitHub/mediashare",
+                            "mkdir -p docs/issues",
+                            "git add docs/issues/P13-1-storage-media-bucket-detail-plan.json",
+                            "git commit -m "feat(p13): criar policies RLS do bucket media e doc mínima (Refs #$ISSUE)"",
+                            "git add -A",
+                            "git commit -m "feat(p13): finalizar P13-1 (Closes #$ISSUE)""
+                        ],
+                        "push": [
+                            "cd /e/GitHub/mediashare",
+                            "git push -u origin feature/$ISSUE-p13-1-storage-media-bucket-rls"
+                        ],
+                        "pr_create": [
+                            "cd /e/GitHub/mediashare",
+                            "gh pr create -R alexandrepapadopolis/mediashare --base main --head feature/$ISSUE-p13-1-storage-media-bucket-rls --title "P13-1: Storage bucket media + RLS por owner" --body "Relaciona-se ao épico #33. Cria bucket privado 'media' (via Studio), aplica policies (via SQL Editor) e documenta o processo em docs/issues. Não inclui upload binário no app (P13-2).""
+                        ]
+                    }
+                }
+            ]
+        },
+        "acceptance_criteria": [
+            "Supabase local está rodando (conforme `supabase status`), com Studio acessível em [http://127.0.0.1:54323](http://127.0.0.1:54323).",
+            "Bucket "media" existe no Supabase Storage local e está configurado como Private (public=false).",
+            "Policies em storage.objects existem e estão ativas para bucket_id='media': insert/select/delete/update conforme SQL do plano.",
+            "INSERT: usuário autenticado só consegue inserir se o objeto estiver no prefixo do próprio uid ((storage.foldername(name))[1] == auth.uid()) e owner_id == auth.uid().",
+            "SELECT/DELETE/UPDATE: usuário autenticado só consegue operar em objetos cujo owner_id == auth.uid().",
+            "Documentação mínima foi criada em docs/issues/P13-1-storage-media-bucket-detail-plan.json e não contém segredos (publishable/secret keys, S3 access/secret keys).",
+            "Nenhuma alteração foi feita em auth/session e nenhuma implementação de upload binário foi adicionada (P13-2 permanece pendente)."
+        ],
+        "risks": [
+            "A atualização do Supabase CLI está disponível (v2.72.7), mas não é requisito para P13-1. Se houver divergências de comportamento em Storage/RLS entre versões, pode ser necessário alinhar a CLI posteriormente.",
+            "As policies assumem a convenção de path "<uid>/<mediaId>/<filename>"; P13-2 deve seguir essa convenção para não quebrar uploads por RLS.",
+            "Objetos criados por fluxos administrativos/serviço podem não ter owner_id esperado; as policies por owner podem bloquear acesso de usuários finais nesses casos.",
+            "Serviços opcionais parados (imgproxy/analytics/vector/pooler) não devem afetar Storage/policies, mas podem impactar testes colaterais se existirem dependências não mapeadas fora do escopo de P13-1."
+        ]
+    },
+    "doc_alignment_with_repo": {
+        "observations_from_zip": [
+            "Existe o diretório docs/issues com arquivos P08-media-detail-plan.json e P09-secure-routes-detail-plan.json.",
+            "Há variação de formatação entre P08 e P09 (um contém fence de código; outro contém strings com aspas não escapadas).",
+            "Para automação e consistência com seu requisito atual, P13-1 deve ser salvo como JSON válido (sem fences; strings com aspas corretamente escapadas)."
+        ],
+        "doc_output_decision": {
+            "path": "docs/issues/P13-1-storage-media-bucket-detail-plan.json",
+            "format": "JSON válido (sem markdown fences)",
+            "reason": "Compatibilidade com automações e prevenção de erros de parsing/execução."
+        }
+    }
+}
