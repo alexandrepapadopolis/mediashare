@@ -1,7 +1,7 @@
 // app/routes/app.tsx
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, Link, Outlet, useLoaderData } from "@remix-run/react";
+import { Form, Link, Outlet, useLoaderData, useLocation } from "@remix-run/react";
 import { destroySession, getAccessToken, getSession, getUserId } from "../utils/session.server";
 
 type LoaderData = {
@@ -32,6 +32,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function AppRoute() {
   const { userId } = useLoaderData<LoaderData>();
+  const location = useLocation();
+  const search = location.search || "";
 
   return (
     <div className="min-h-screen">
@@ -50,6 +52,12 @@ export default function AppRoute() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Link
+              to={`/app/upload${search}`}
+              className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
+            >
+              Enviar mídia
+            </Link>
             <Link
               to="/"
               className="inline-flex h-10 items-center justify-center rounded-md border px-4 text-sm font-medium hover:bg-muted"
