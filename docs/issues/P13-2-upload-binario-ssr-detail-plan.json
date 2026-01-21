@@ -1,0 +1,79 @@
+```json
+{
+    "issue_proposal": {
+        "epic_parent": 33,
+        "key": "P13-2",
+        "suggested_title": "P13-2: Upload binário via SSR (Remix action) + vínculo ao draft em public.media",
+        "suggested_labels": [
+            "phosio",
+            "backend",
+            "remix",
+            "supabase"
+        ],
+        "suggested_body": "Sub-issue do épico #33.\n\nEscopo:\n- Implementar upload binário real via SSR (Remix action) na rota /app/upload\n- Upload passando exclusivamente pelo server (sem signed URL, sem client-side upload)\n- Usar Supabase Storage (bucket privado media) com RLS já existente\n- Atualizar o draft existente em public.media após upload bem-sucedido\n- Redirect automático para /app/media/:id\n\nFora de escopo:\n- Processamento assíncrono (thumbnails, transcode, etc.)\n- Background jobs\n- Alterações de schema no banco\n\nPremissas:\n- Sessão via cookie httpOnly\n- Nenhum token no browser\n- MIME permitidos: image/*, video/*, audio/*\n- Tamanho máximo: 1GB por arquivo\n- Upload múltiplo por submissão\n- Path obrigatório no Storage: <auth.uid()>/<mediaId>/<filename>"
+    },
+    "repo_context": {
+        "local_windows_path": "E:\\GitHub\\mediashare",
+        "local_git_bash_path": "/e/GitHub/mediashare",
+        "dev_environment": {
+            "os": "Windows 11",
+            "shell": "Git Bash (MINGW64)",
+            "docker_dev": true,
+            "container_mount": "/app",
+            "restart_cmd": "docker restart phosio-app-dev"
+        }
+    },
+    "inputs_required_from_user": [],
+    "plan": {
+        "overview": "Adicionar upload binário real à rota /app/upload, estendendo a action SSR existente. O fluxo cria o draft lógico (já implementado), realiza upload sequencial de múltiplos arquivos para o Supabase Storage usando o accessToken do usuário, atualiza o registro existente em public.media e redireciona automaticamente para /app/media/:id.",
+        "prs": [
+            {
+                "pr": "PR1",
+                "branch": "feature/<issue>-p13-2-upload-binario-ssr",
+                "scope": "Upload binário SSR + update do draft em public.media",
+                "responsibilities": [
+                    "Estender a action de app/routes/app.upload.tsx para suportar multipart/form-data",
+                    "Adicionar input de arquivo (multiple) no formulário",
+                    "Validar MIME e tamanho máximo (1GB) no server",
+                    "Executar upload sequencial de arquivos para o Supabase Storage via REST",
+                    "Atualizar o draft existente em public.media com metadados do arquivo",
+                    "Redirecionar automaticamente para /app/media/:id após sucesso"
+                ],
+                "files_to_change": [
+                    "app/routes/app.upload.tsx"
+                ],
+                "sql_to_run_in_supabase_studio": [],
+                "commit_sequence": [
+                    "feat(p13): upload binário SSR vinculado ao draft (Refs #<issue>)",
+                    "feat(p13): finalizar upload binário SSR e redirect (Closes #<issue>)"
+                ],
+                "git_commands": {
+                    "branch": [
+                        "cd /e/GitHub/mediashare",
+                        "git checkout main",
+                        "git pull origin main",
+                        "git checkout -b feature/<issue>-p13-2-upload-binario-ssr"
+                    ],
+                    "commit": [],
+                    "push": [],
+                    "pr_create": []
+                }
+            }
+        ]
+    },
+    "acceptance_criteria": [
+        "Upload de múltiplos arquivos (image/*, video/*, audio/*) funciona via SSR",
+        "Nenhum token é exposto ao browser",
+        "Uploads respeitam o path <auth.uid()>/<mediaId>/<filename>",
+        "RLS do Supabase Storage é respeitada",
+        "Registro existente em public.media é atualizado corretamente",
+        "Redirect automático para /app/media/:id ocorre após upload bem-sucedido",
+        "Nenhuma alteração de schema ou sessão foi realizada"
+    ],
+    "risks": [
+        "Upload de múltiplos arquivos grandes pode consumir memória no Node",
+        "Falha parcial em uploads exige abortar toda a ação",
+        "Timeouts em uploads muito grandes em ambientes de desenvolvimento"
+    ]
+}
+```
