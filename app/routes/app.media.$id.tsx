@@ -16,9 +16,13 @@ import { getSession, destroySession } from "../utils/session.server";
 type MediaDetail = {
   id: string;
   title: string | null;
+  description: string | null;
   media_type: string | null;
   created_at: string | null;
   tags: unknown;
+
+  // P13-2 armazena múltiplos arquivos em metadata.files[]
+  metadata: unknown;
 
   // Campos relevantes para Storage (P13-2 já preenche)
   storage_bucket: string | null;
@@ -61,6 +65,7 @@ async function fetchMediaById(args: {
     [
       "id",
       "title",
+      "description",
       "media_type",
       "created_at",
       "tags",
@@ -69,6 +74,7 @@ async function fetchMediaById(args: {
       "mime_type",
       "original_filename",
       "size_bytes",
+      "metadata",
     ].join(",")
   );
   url.searchParams.set("limit", "1");
@@ -161,6 +167,40 @@ async function createSignedUrl(args: {
   return `${supabaseUrl}${normalized}`;
 }
 
+type MetadataFile = {
+  bucket?: string;
+  path?: string;
+  original_filename?: string;
+  mime_type?: string;
+  size_bytes?: number;
+};
+
+function extractMetadataFiles(metadata: unknown): MetadataFile[] {
+  if (!metadata || typeof metadata !== "object") return [];
+  const m = metadata as Record<string, unknown>;
+  const files = m.files;
+  if (!Array.isArray(files)) return [];
+
+  return files
+    .filter((x) => x && typeof x === "object")
+    .map((x) => x as Record<string, unknown>)
+    .map((x) => ({
+      bucket: typeof x.bucket === "string" ? x.bucket : undefined,
+      path: typeof x.path === "string" ? x.path : undefined,
+      original_filename:
+        typeof x.original_filename === "string" ? x.original_filename : undefined,
+      mime_type: typeof x.mime_type === "string" ? x.mime_type : undefined,
+      size_bytes: typeof x.size_bytes === "number" ? x.size_bytes : undefined,
+    }))
+    .filter((f) => !!f.path);
+}
+
+function filenameFromPath(path: string): string {
+  const seg = path.split("/").pop();
+  return seg && seg.trim().length ? seg : "(arquivo)";
+}
+
+
 /* ===========================
  * Loader SSR (rota protegida)
  * =========================== */
@@ -189,21 +229,62 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       throw new Response("Not Found", { status: 404 });
     }
 
-    let signedUrl: string | null = null;
-    const bucket = media.storage_bucket || null;
-    const objectPath = media.storage_object_path || null;
+    const fromMetadata = extractMetadataFiles(media.metadata);
 
-    if (bucket && objectPath) {
-      signedUrl = await createSignedUrl({
-        accessToken,
-        bucket,
-        objectPath,
-        expiresInSeconds: SIGNED_URL_TTL_SECONDS,
-      });
-    }
+    const files: Array<{
+      bucket: string;
+      path: string;
+      mime_type: string | null;
+      original_filename: string | null;
+      size_bytes: number | null;
+    }> =
+      fromMetadata.length > 0
+        ? fromMetadata.map((f) => ({
+          bucket: f.bucket ?? media.storage_bucket ?? "media",
+          path: f.path!,
+          mime_type: f.mime_type ?? null,
+          original_filename: f.original_filename ?? null,
+          size_bytes: typeof f.size_bytes === "number" ? f.size_bytes : null,
+        }))
+        : media.storage_bucket && media.storage_object_path
+          ? [
+            {
+              bucket: media.storage_bucket,
+              path: media.storage_object_path,
+              mime_type: media.mime_type ?? null,
+              original_filename: media.original_filename ?? null,
+              size_bytes: media.size_bytes ?? null,
+            },
+          ]
+          : [];
+
+    const signedFiles = await Promise.all(
+      files.map(async (f) => {
+        const signedUrl = await createSignedUrl({
+          accessToken,
+          bucket: f.bucket,
+          objectPath: f.path,
+          expiresInSeconds: SIGNED_URL_TTL_SECONDS,
+        });
+
+        return {
+          bucket: f.bucket,
+          path: f.path,
+          signedUrl,
+          mime_type: f.mime_type,
+          original_filename: f.original_filename ?? filenameFromPath(f.path),
+          size_bytes: f.size_bytes,
+        };
+      })
+    );
+
+    // Compat: mantém signedUrl (primário) para UI legada/elementos que ainda esperam um único arquivo.
+    const signedUrl =
+      Array.isArray(signedFiles) && signedFiles.length > 0 ? signedFiles[0].signedUrl : null;
 
     return json({
       media,
+      signedFiles,
       signedUrl,
       signedUrlTtlSeconds: SIGNED_URL_TTL_SECONDS,
     });
@@ -241,7 +322,7 @@ function formatBytes(bytes: number | null): string {
 }
 
 export default function MediaDetailRoute() {
-  const { media, signedUrl, signedUrlTtlSeconds } = useLoaderData<typeof loader>();
+  const { media, signedFiles, signedUrlTtlSeconds } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
 
   const from = safeFromParam(searchParams.get("from"));
@@ -252,14 +333,18 @@ export default function MediaDetailRoute() {
     : typeof media.tags === "string"
       ? media.tags
       : "";
+ 
+  const descriptionText =
+    typeof media.description === "string" && media.description.trim().length > 0
+      ? media.description.trim()
+      : "";
 
-  const mime = media.mime_type ?? "";
-  const canPreviewImage = signedUrl && mime.startsWith("image/");
-  const canPreviewVideo = signedUrl && mime.startsWith("video/");
-  const canPreviewAudio = signedUrl && mime.startsWith("audio/");
+  const primary = Array.isArray(signedFiles) && signedFiles.length ? signedFiles[0] : null;
+  const primaryMime = primary?.mime_type ?? "";
+  const primaryCanPreviewImage = !!primary?.signedUrl && primaryMime.startsWith("image/");
+  const primaryCanPreviewVideo = !!primary?.signedUrl && primaryMime.startsWith("video/");
+  const primaryCanPreviewAudio = !!primary?.signedUrl && primaryMime.startsWith("audio/");
 
-  const filename = media.original_filename ?? media.storage_object_path ?? "(arquivo)";
-  const sizeText = formatBytes(media.size_bytes ?? null);
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6">
@@ -280,6 +365,9 @@ export default function MediaDetailRoute() {
             <strong>Criado em:</strong> {media.created_at ?? "—"}
           </div>
           <div>
+            <strong>Descrição:</strong> {descriptionText || "—"}
+          </div>
+          <div>
             <strong>Tags:</strong> {tagsText || "—"}
           </div>
           <div>
@@ -289,71 +377,100 @@ export default function MediaDetailRoute() {
           <div className="mt-2 border-t pt-3">
             <div className="grid gap-1">
               <div>
-                <strong>Arquivo:</strong> {filename}
+                <strong>Arquivos:</strong> {Array.isArray(signedFiles) ? signedFiles.length : 0}
               </div>
               <div>
-                <strong>MIME:</strong> {mime || "—"}
-              </div>
-              <div>
-                <strong>Tamanho:</strong> {sizeText}
-              </div>
-              <div>
-                <strong>Storage:</strong>{" "}
+                <strong>Storage (primário):</strong>{" "}
                 {media.storage_bucket && media.storage_object_path
                   ? `${media.storage_bucket}/${media.storage_object_path}`
                   : "—"}
+              </div>
+              <div>
+                <strong>MIME (primário):</strong> {media.mime_type ?? "—"}
+              </div>
+              <div>
+                <strong>Arquivo (primário):</strong>{" "}
+                {media.original_filename ?? media.storage_object_path ?? "—"}
               </div>
             </div>
           </div>
         </div>
 
         <div className="mt-6">
-          <div className="mb-2 text-sm font-medium">Preview</div>
+          <div className="mb-2 text-sm font-medium">Arquivos</div>
 
-          {!signedUrl ? (
-            <div className="flex h-64 items-center justify-center rounded-md border bg-gray-50 text-sm text-gray-600">
-              Sem binário vinculado ou Signed URL indisponível.
+          {!Array.isArray(signedFiles) || signedFiles.length === 0 ? (
+            <div className="rounded-md border bg-gray-50 p-4 text-sm text-gray-600">
+              Nenhum arquivo encontrado para esta mídia.
             </div>
           ) : (
-            <div className="rounded-md border bg-gray-50 p-3">
-              {canPreviewImage ? (
-                <img
-                  src={signedUrl}
-                  alt={media.title ?? "Preview"}
-                  className="mx-auto max-h-[24rem] w-auto rounded"
-                />
-              ) : null}
+            <div className="grid gap-3">
+              {signedFiles.map((f) => {
+                const mime = f.mime_type ?? "";
+                const canImg = mime.startsWith("image/");
+                const canVid = mime.startsWith("video/");
+                const canAud = mime.startsWith("audio/");
 
-              {canPreviewVideo ? (
-                <video
-                  src={signedUrl}
-                  controls
-                  className="mx-auto max-h-[24rem] w-full rounded"
-                />
-              ) : null}
+                return (
+                  <div key={`${f.bucket}:${f.path}`} className="rounded-md border bg-white p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-slate-900">
+                          {f.original_filename ?? filenameFromPath(f.path)}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          {f.bucket}/{f.path}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          MIME: {mime || "—"} • Tamanho: {formatBytes(f.size_bytes ?? null)}
+                        </div>
+                      </div>
 
-              {canPreviewAudio ? (
-                <audio src={signedUrl} controls className="w-full" />
-              ) : null}
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={f.signedUrl}
+                          className="inline-flex items-center rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white"
+                          download
+                        >
+                          Download
+                        </a>
+                      </div>
+                    </div>
 
-              {!canPreviewImage && !canPreviewVideo && !canPreviewAudio ? (
-                <div className="flex h-48 items-center justify-center text-sm text-gray-600">
-                  Preview não suportado para este tipo. Use download.
-                </div>
-              ) : null}
+                    <div className="mt-3 rounded-md border bg-gray-50 p-3">
+                      {canImg ? (
+                        <img
+                          src={f.signedUrl}
+                          alt={f.original_filename ?? "Preview"}
+                          className="mx-auto max-h-[18rem] w-auto rounded"
+                        />
+                      ) : null}
 
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="text-xs text-gray-600">
-                  Link temporário (TTL ~ {signedUrlTtlSeconds}s)
-                </div>
-                <a
-                  href={signedUrl}
-                  className="inline-flex items-center rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white"
-                  download
-                >
-                  Download
-                </a>
-              </div>
+                      {canVid ? (
+                        <video
+                          src={f.signedUrl}
+                          controls
+                          className="mx-auto max-h-[18rem] w-full rounded"
+                        />
+                      ) : null}
+
+                      {canAud ? (
+                        <audio src={f.signedUrl} controls className="w-full" />
+                      ) : null}
+
+                      {!canImg && !canVid && !canAud ? (
+                        <div className="flex h-24 items-center justify-center text-sm text-gray-600">
+                          Preview não suportado para este tipo. Use download.
+                        </div>
+                      ) : null}
+
+                      <div className="mt-3 text-xs text-gray-600">
+                        Link temporário (TTL ~ {signedUrlTtlSeconds}s)
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
