@@ -363,6 +363,8 @@ export async function action({ request }: ActionFunctionArgs) {
         if (primaryImageFile) {
             const generated = await generateThumbnailWebp(primaryImageFile, 320);
             if (generated) {
+                // Mantém o layout que você já está usando hoje.
+                // Se preferir outro padrão, altere aqui e ajuste o validador/cURL.
                 const thumbObjectPath = encodePathSegments(["thumbnails", userId, id, "w320.webp"]);
 
                 await uploadBufferToSupabaseStorage({
@@ -375,7 +377,7 @@ export async function action({ request }: ActionFunctionArgs) {
                     buffer: generated.buffer,
                 });
 
-                // Bucket é público (no seu config.toml), então URL pública é estável e não expira.
+                // Bucket público => URL pública estável (não expira).
                 const publicUrl = `${supabaseUrl}/storage/v1/object/public/${bucket}/${thumbObjectPath}`;
 
                 thumbnail = {
@@ -389,8 +391,14 @@ export async function action({ request }: ActionFunctionArgs) {
                 };
             }
         }
-    } catch {
-        // Silencioso por design: thumbnail não deve falhar o upload principal.
+    } catch (e) {
+        // Best-effort com observabilidade: não quebra o upload principal, mas deixa rastro no log.
+        console.error("[thumb] failed to generate/upload", {
+            mediaId: id,
+            userId,
+            bucket,
+            message: e instanceof Error ? e.message : String(e),
+        });
         thumbnail = null;
     }
 
