@@ -1,11 +1,16 @@
 // app/utils/env.server.ts
-type Env = {
-  VITE_SUPABASE_URL: string;
-  VITE_SUPABASE_PUBLISHABLE_KEY: string;
+type ServerEnv = {
+  SUPABASE_URL: string;
+  SUPABASE_ANON_KEY: string;
   SESSION_SECRET: string;
 };
 
-function required(name: keyof Env): string {
+type PublicEnv = {
+  SUPABASE_URL: string;
+  SUPABASE_ANON_KEY: string;
+};
+
+function required(name: string): string {
   const v = process.env[name];
   if (!v || typeof v !== "string" || v.trim().length === 0) {
     throw new Error(`Invalid environment variables: ${name}: Required`);
@@ -13,10 +18,18 @@ function required(name: keyof Env): string {
   return v;
 }
 
-export function getEnv(): Env {
+export function getServerEnv(): ServerEnv {
   return {
-    VITE_SUPABASE_URL: required("VITE_SUPABASE_URL"),
-    VITE_SUPABASE_PUBLISHABLE_KEY: required("VITE_SUPABASE_PUBLISHABLE_KEY"),
+    SUPABASE_URL: required("SUPABASE_URL"),
+    SUPABASE_ANON_KEY: required("SUPABASE_ANON_KEY"),
     SESSION_SECRET: required("SESSION_SECRET"),
+  };
+}
+
+export function getPublicEnv(): PublicEnv {
+  // IMPORTANTE: só variáveis seguras para expor ao browser
+  return {
+    SUPABASE_URL: required("SUPABASE_URL"),
+    SUPABASE_ANON_KEY: required("SUPABASE_ANON_KEY"),
   };
 }

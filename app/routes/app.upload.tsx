@@ -1,17 +1,32 @@
+// app/routes/app.upload.tsx
+
 import { useMemo, useState } from "react";
 import type { ActionFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useLocation, useNavigate, useNavigation } from "@remix-run/react";
 import { createHash } from "node:crypto";
 import { Readable, Transform } from "node:stream";
-import { getEnv } from "../utils/env.server";
+import { getServerEnv } from "../utils/env.server";
 import { getAccessToken, getUserId } from "../utils/session.server";
+
+// --- Tipagens ---
 
 type ActionData =
     | { ok: true; id: string }
     | { ok: false; formError?: string; fieldErrors?: Record<string, string>; postgrestError?: string };
 
-function isValidMediaType(value: string): value is "photo" | "video" | "audio" {
+type MediaType = "photo" | "video" | "audio";
+
+type FormState = {
+    title: string;
+    description: string;
+    tagsCsv: string;
+    mediaType: MediaType;
+};
+
+// --- Helpers e Validações ---
+
+function isValidMediaType(value: string): value is MediaType {
     return value === "photo" || value === "video" || value === "audio";
 }
 
@@ -31,12 +46,33 @@ function encodePathSegments(segments: string[]): string {
     return segments.map((s) => encodeURIComponent(s)).join("/");
 }
 
+function normalizeTags(tagsCsv: string): string[] {
+    const raw = tagsCsv
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+    const normalized = raw
+        .map((t) => t.toLowerCase())
+        .map((t) => t.replace(/\s+/g, "-"))
+        .map((t) => t.replace(/[^a-z0-9\-_.]/g, ""))
+        .filter(Boolean);
+
+    return Array.from(new Set(normalized));
+}
+
+function isValidTitle(value: string): boolean {
+    return value.trim().length >= 3;
+}
+
+// --- Funções de Upload (Server-Side) ---
+
 async function uploadToSupabaseStorage(args: {
     supabaseUrl: string;
     supabaseAnonKey: string;
     accessToken: string;
     bucket: string;
-    objectPath: string; // URL-encoded segments joined by "/"
+    objectPath: string;
     file: File;
 }): Promise<{
     checksum_sha256: string;
@@ -93,6 +129,8 @@ async function uploadToSupabaseStorage(args: {
     };
 }
 
+// --- Action (Server-Side Logic) ---
+
 export async function action({ request }: ActionFunctionArgs) {
     const accessToken = await getAccessToken(request);
     if (!accessToken) {
@@ -119,17 +157,18 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const tags = normalizeTags(tagsCsv);
+    const env = getServerEnv();
+    const supabaseUrl = env.SUPABASE_URL;
+    const supabaseAnonKey = env.SUPABASE_ANON_KEY;
 
-    const env = getEnv();
-    const supabaseUrl = env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = env.VITE_SUPABASE_PUBLISHABLE_KEY;
     if (!supabaseUrl || !supabaseAnonKey) {
         return json<ActionData>(
-            { ok: false, formError: "Configuração ausente: VITE_SUPABASE_URL/VITE_SUPABASE_PUBLISHABLE_KEY." },
+            { ok: false, formError: "Configuração ausente: SUPABASE_URL/SUPABASE_ANON_KEY." },
             { status: 500 }
         );
     }
 
+    // 1. Cria o registro lógico no banco (Draft)
     const payload = {
         user_id: userId,
         title: title.trim(),
@@ -170,14 +209,16 @@ export async function action({ request }: ActionFunctionArgs) {
         return json<ActionData>({ ok: false, postgrestError: "Resposta inesperada do PostgREST (id ausente)." }, { status: 502 });
     }
 
-    // ---- P13-2: upload binário + update draft + redirect ----
+    // 2. Processa o Upload dos arquivos
     const fileEntries = formData.getAll("files");
     const files = fileEntries.filter((v): v is File => v instanceof File);
 
     if (!files.length) {
+        // Nota: Se a validação client-side falhar, isso captura no server
         return json<ActionData>({ ok: false, formError: "Selecione ao menos um arquivo para enviar." }, { status: 400 });
     }
 
+    // Validação de segurança dos arquivos antes de enviar
     for (const f of files) {
         const mime = f.type || "";
         if (!isAllowedMime(mime)) {
@@ -205,7 +246,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const directoryRel = `${userId}/${id}`;
     const nowIso = new Date().toISOString();
 
-    // Carregar metadata atual para merge seguro (sem sobrescrever defaults)
+    // Tenta carregar metadados existentes para merge (caso expanda para multi-step no futuro)
     let currentMetadata: unknown = {};
     try {
         const metaResp = await fetch(`${supabaseUrl}/rest/v1/media?id=eq.${id}&select=metadata`, {
@@ -266,6 +307,7 @@ export async function action({ request }: ActionFunctionArgs) {
         );
     }
 
+    // 3. Atualiza o registro com os dados dos arquivos (PATCH)
     const primary = uploadedFiles[0];
     const mergedMetadata =
         typeof currentMetadata === "object" && currentMetadata !== null
@@ -322,33 +364,7 @@ export const meta: MetaFunction = () => {
     ];
 };
 
-type MediaType = "photo" | "video" | "audio";
-
-type FormState = {
-    title: string;
-    description: string;
-    tagsCsv: string;
-    mediaType: MediaType;
-};
-
-function normalizeTags(tagsCsv: string): string[] {
-    const raw = tagsCsv
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean);
-
-    const normalized = raw
-        .map((t) => t.toLowerCase())
-        .map((t) => t.replace(/\s+/g, "-"))
-        .map((t) => t.replace(/[^a-z0-9\-_.]/g, ""))
-        .filter(Boolean);
-
-    return Array.from(new Set(normalized));
-}
-
-function isValidTitle(value: string): boolean {
-    return value.trim().length >= 3;
-}
+// --- Componente React ---
 
 export default function AppUploadRoute() {
     const navigate = useNavigate();
@@ -356,7 +372,10 @@ export default function AppUploadRoute() {
     const search = location.search || "";
     const actionData = useActionData<ActionData>();
     const navigation = useNavigation();
+    
     const isSubmitting = navigation.state === "submitting";
+    
+    // Estado do formulário
     const [form, setForm] = useState<FormState>({
         title: "",
         description: "",
@@ -364,22 +383,27 @@ export default function AppUploadRoute() {
         mediaType: "photo",
     });
 
-    const tagsPreview = useMemo(() => normalizeTags(form.tagsCsv), [form.tagsCsv]);
+    // 1. Estado para saber se existem arquivos selecionados
+    const [hasFiles, setHasFiles] = useState(false);
 
+    const tagsPreview = useMemo(() => normalizeTags(form.tagsCsv), [form.tagsCsv]);
+    
     const titleOk = isValidTitle(form.title);
-    const canContinue = titleOk;
+    
+    // 2. O botão só habilita se tiver Título válido E Arquivos selecionados
+    const canContinue = titleOk && hasFiles;
 
     return (
         <div className="mx-auto w-full max-w-3xl px-4 py-8">
             <header className="mb-6">
                 <h1 className="text-2xl font-semibold tracking-tight">Enviar mídia</h1>
                 <p className="mt-2 text-sm text-slate-600">
-                    Nesta etapa você informa apenas os metadados. O envio do arquivo e a persistência serão adicionados em PRs
-                    seguintes.
+                    Nesta etapa você informa os metadados e seleciona os arquivos. O envio será processado pelo servidor.
                 </p>
             </header>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                {/* Feedback de Erro */}
                 {actionData?.ok === false && (actionData.formError || actionData.postgrestError) ? (
                     <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
                         {actionData.formError ? <p>{actionData.formError}</p> : null}
@@ -387,18 +411,17 @@ export default function AppUploadRoute() {
                     </div>
                 ) : null}
 
+                {/* Feedback de Sucesso */}
                 {actionData?.ok === true ? (
                     <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-                        <p>Mídia criada com sucesso (draft lógico).</p>
-                        <p className="mt-1">
-                            ID: <span className="font-mono">{actionData.id}</span>
-                        </p>
+                        <p>Mídia enviada com sucesso! Redirecionando...</p>
                     </div>
                 ) : null}
 
                 <Form method="post" encType="multipart/form-data" className="space-y-6">
 
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        {/* Campo Título */}
                         <div className="sm:col-span-2">
                             <label htmlFor="title" className="block text-sm font-medium text-slate-900">
                                 Título <span className="text-rose-600">*</span>
@@ -420,6 +443,7 @@ export default function AppUploadRoute() {
                             </p>
                         </div>
 
+                        {/* Campo Tipo */}
                         <div>
                             <label htmlFor="mediaType" className="block text-sm font-medium text-slate-900">
                                 Tipo
@@ -438,6 +462,7 @@ export default function AppUploadRoute() {
                             {actionData?.ok === false && actionData.fieldErrors?.mediaType ? <p className="mt-2 text-xs text-rose-700">{actionData.fieldErrors.mediaType}</p> : null}
                         </div>
 
+                        {/* Campo Tags */}
                         <div>
                             <label htmlFor="tags" className="block text-sm font-medium text-slate-900">
                                 Tags (separadas por vírgula)
@@ -457,6 +482,7 @@ export default function AppUploadRoute() {
                         </div>
                     </div>
 
+                    {/* Campo Descrição */}
                     <div>
                         <label htmlFor="description" className="block text-sm font-medium text-slate-900">
                             Descrição
@@ -472,6 +498,7 @@ export default function AppUploadRoute() {
                         />
                     </div>
 
+                    {/* Campo Arquivos */}
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
                         <p className="text-sm font-medium text-slate-900">Arquivos</p>
                         <p className="text-sm text-slate-600">
@@ -483,6 +510,8 @@ export default function AppUploadRoute() {
                             type="file"
                             multiple
                             accept="image/*,video/*,audio/*"
+                            // 3. Atualiza o estado para liberar o botão
+                            onChange={(e) => setHasFiles(!!e.target.files?.length)}
                             className="block w-full text-sm text-slate-700 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-800"
                         />
                         <p className="text-xs text-slate-500">
@@ -500,6 +529,7 @@ export default function AppUploadRoute() {
                         </button>
                         <button
                             type="submit"
+                            // Habilitado se tiver título E arquivos
                             disabled={!canContinue || isSubmitting}
                             className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
                         >

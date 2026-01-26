@@ -1,5 +1,7 @@
-import type { LinksFunction } from "@remix-run/node";
-import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "@remix-run/react";
+// app/root.tsx
+
+import { type LinksFunction } from "@remix-run/node";
+import { Links, LiveReload, Meta, Outlet, Scripts, ScrollRestoration } from "@remix-run/react";
 
 import tailwindStylesheetUrl from "./tailwind.css";
 
@@ -8,6 +10,8 @@ export const links: LinksFunction = () => [
 ];
 
 export default function App() {
+  const isProd = process.env.NODE_ENV === "production";
+
   return (
     <html lang="pt-BR">
       <head>
@@ -19,7 +23,9 @@ export default function App() {
       <body>
         <Outlet />
         <ScrollRestoration />
+        <script src="/env.js"></script>
         <Scripts />
+        {!isProd ? <LiveReload /> : null}
       </body>
     </html>
   );

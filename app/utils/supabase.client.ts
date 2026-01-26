@@ -1,24 +1,34 @@
 // app/utils/supabase.client.ts
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-export function createSupabaseServerClient(_request?: Request): {
-  supabase: SupabaseClient;
-  headers: Headers;
-} {
-  // No browser: usa publishable key e deixa o Supabase lidar com o fluxo de OAuth e callbacks.
-  // Em SSR: NÃO use este client para ler dados sensíveis; prefira supabase.server.ts.
-  export function createSupabaseBrowserClient() {
-    const url = (window as any).__ENV?.VITE_SUPABASE_URL ?? import.meta.env.VITE_SUPABASE_URL;
-    const key =
-      (window as any).__ENV?.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-
-    return createClient(url, key, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-      },
-    });
+declare global {
+  interface Window {
+    __ENV?: {
+      SUPABASE_URL?: string;
+      SUPABASE_ANON_KEY?: string;
+    };
   }
 }
 
+function required(name: "SUPABASE_URL" | "SUPABASE_ANON_KEY"): string {
+  const v = window.__ENV?.[name];
+  if (!v || typeof v !== "string" || v.trim().length === 0) {
+    throw new Error(`Missing public env var in window.__ENV: ${name}`);
+  }
+  return v;
+}
+
+// No browser: usa ANON KEY e deixa o Supabase lidar com o fluxo de OAuth e callbacks.
+// Em SSR: NÃO use este client para ler dados sensíveis; prefira um client server-only.
+export function createSupabaseBrowserClient(): SupabaseClient {
+  const url = required("SUPABASE_URL");
+  const key = required("SUPABASE_ANON_KEY");
+
+  return createClient(url, key, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  });
+}
