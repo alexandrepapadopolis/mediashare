@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { Readable, Transform } from "node:stream";
 import { getServerEnv } from "../utils/env.server";
 import { getAccessToken, getUserId } from "../utils/session.server";
+import { generateThumbnailWebp, isImageMime } from "../utils/thumbnail.server";
 
 // --- Tipagens ---
 
@@ -129,6 +130,41 @@ async function uploadToSupabaseStorage(args: {
     };
 }
 
+async function uploadBufferToSupabaseStorage(args: {
+    supabaseUrl: string;
+    supabaseAnonKey: string;
+    accessToken: string;
+    bucket: string;
+    objectPath: string;
+    contentType: string;
+    buffer: Buffer;
+}): Promise<void> {
+    const { supabaseUrl, supabaseAnonKey, accessToken, bucket, objectPath, contentType, buffer } = args;
+
+    const url = `${supabaseUrl}/storage/v1/object/${bucket}/${objectPath}`;
+    const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": contentType,
+            "x-upsert": "true",
+        },
+        body: buffer,
+    });
+
+    if (!resp.ok) {
+        let details = "";
+        try {
+            const j = await resp.json();
+            details = typeof j === "string" ? j : JSON.stringify(j);
+        } catch {
+            details = await resp.text().catch(() => "");
+        }
+        throw new Error(`Storage thumbnail ${resp.status}: ${details}`);
+    }
+}
+
 // --- Action (Server-Side Logic) ---
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -206,7 +242,10 @@ export async function action({ request }: ActionFunctionArgs) {
     const created = (await resp.json()) as Array<{ id: string }>;
     const id = created?.[0]?.id;
     if (!id) {
-        return json<ActionData>({ ok: false, postgrestError: "Resposta inesperada do PostgREST (id ausente)." }, { status: 502 });
+        return json<ActionData>(
+            { ok: false, postgrestError: "Resposta inesperada do PostgREST (id ausente)." },
+            { status: 502 }
+        );
     }
 
     // 2. Processa o Upload dos arquivos
@@ -307,12 +346,79 @@ export async function action({ request }: ActionFunctionArgs) {
         );
     }
 
-    // 3. Atualiza o registro com os dados dos arquivos (PATCH)
+    // 3. Gera thumbnail (somente para imagens) e sobe para o Storage (best-effort)
+    // Importante: mantemos best-effort para não bloquear upload de vídeo/áudio.
+    let thumbnail: {
+        objectPath: string;
+        publicUrl: string;
+        width: number;
+        height: number;
+        mime_type: "image/webp";
+        variant: "w320-webp";
+        generated_at: string;
+    } | null = null;
+
+    try {
+        const primaryImageFile = files.find((f) => isImageMime(f.type)) ?? null;
+        if (primaryImageFile) {
+            const generated = await generateThumbnailWebp(primaryImageFile, 320);
+            if (generated) {
+                const thumbObjectPath = encodePathSegments(["thumbnails", userId, id, "w320.webp"]);
+
+                await uploadBufferToSupabaseStorage({
+                    supabaseUrl,
+                    supabaseAnonKey,
+                    accessToken,
+                    bucket,
+                    objectPath: thumbObjectPath,
+                    contentType: "image/webp",
+                    buffer: generated.buffer,
+                });
+
+                // Bucket é público (no seu config.toml), então URL pública é estável e não expira.
+                const publicUrl = `${supabaseUrl}/storage/v1/object/public/${bucket}/${thumbObjectPath}`;
+
+                thumbnail = {
+                    objectPath: thumbObjectPath,
+                    publicUrl,
+                    width: generated.width,
+                    height: generated.height,
+                    mime_type: "image/webp",
+                    variant: "w320-webp",
+                    generated_at: nowIso,
+                };
+            }
+        }
+    } catch {
+        // Silencioso por design: thumbnail não deve falhar o upload principal.
+        thumbnail = null;
+    }
+
+    // 4. Atualiza o registro com os dados dos arquivos (PATCH)
     const primary = uploadedFiles[0];
-    const mergedMetadata =
+
+    const baseMetadata =
         typeof currentMetadata === "object" && currentMetadata !== null
-            ? { ...(currentMetadata as Record<string, unknown>), files: uploadedFiles }
-            : { files: uploadedFiles };
+            ? { ...(currentMetadata as Record<string, unknown>) }
+            : {};
+
+    const mergedMetadata: Record<string, unknown> = {
+        ...baseMetadata,
+        files: uploadedFiles,
+    };
+
+    if (thumbnail) {
+        mergedMetadata.thumbnail = {
+            bucket,
+            objectPath: thumbnail.objectPath,
+            publicUrl: thumbnail.publicUrl,
+            width: thumbnail.width,
+            height: thumbnail.height,
+            mime_type: thumbnail.mime_type,
+            variant: thumbnail.variant,
+            generated_at: thumbnail.generated_at,
+        };
+    }
 
     const patchPayload = {
         storage_bucket: bucket,
@@ -326,6 +432,7 @@ export async function action({ request }: ActionFunctionArgs) {
         fs_created_at: nowIso,
         fs_modified_at: nowIso,
         uploaded_at: nowIso,
+        thumbnail_url: thumbnail ? thumbnail.publicUrl : null,
         metadata: mergedMetadata,
     };
 
@@ -372,9 +479,9 @@ export default function AppUploadRoute() {
     const search = location.search || "";
     const actionData = useActionData<ActionData>();
     const navigation = useNavigation();
-    
+
     const isSubmitting = navigation.state === "submitting";
-    
+
     // Estado do formulário
     const [form, setForm] = useState<FormState>({
         title: "",
@@ -387,9 +494,9 @@ export default function AppUploadRoute() {
     const [hasFiles, setHasFiles] = useState(false);
 
     const tagsPreview = useMemo(() => normalizeTags(form.tagsCsv), [form.tagsCsv]);
-    
+
     const titleOk = isValidTitle(form.title);
-    
+
     // 2. O botão só habilita se tiver Título válido E Arquivos selecionados
     const canContinue = titleOk && hasFiles;
 
@@ -419,7 +526,6 @@ export default function AppUploadRoute() {
                 ) : null}
 
                 <Form method="post" encType="multipart/form-data" className="space-y-6">
-
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         {/* Campo Título */}
                         <div className="sm:col-span-2">
@@ -437,7 +543,9 @@ export default function AppUploadRoute() {
                                 aria-invalid={!titleOk}
                                 aria-describedby="title-help"
                             />
-                            {actionData?.ok === false && actionData.fieldErrors?.title ? <p className="mt-2 text-xs text-rose-700">{actionData.fieldErrors.title}</p> : null}
+                            {actionData?.ok === false && actionData.fieldErrors?.title ? (
+                                <p className="mt-2 text-xs text-rose-700">{actionData.fieldErrors.title}</p>
+                            ) : null}
                             <p id="title-help" className="mt-2 text-xs text-slate-600">
                                 Mínimo de 3 caracteres.
                             </p>
@@ -459,7 +567,9 @@ export default function AppUploadRoute() {
                                 <option value="video">Vídeo</option>
                                 <option value="audio">Áudio</option>
                             </select>
-                            {actionData?.ok === false && actionData.fieldErrors?.mediaType ? <p className="mt-2 text-xs text-rose-700">{actionData.fieldErrors.mediaType}</p> : null}
+                            {actionData?.ok === false && actionData.fieldErrors?.mediaType ? (
+                                <p className="mt-2 text-xs text-rose-700">{actionData.fieldErrors.mediaType}</p>
+                            ) : null}
                         </div>
 
                         {/* Campo Tags */}
@@ -510,7 +620,7 @@ export default function AppUploadRoute() {
                             type="file"
                             multiple
                             accept="image/*,video/*,audio/*"
-                            // 3. Atualiza o estado para liberar o botão
+                            // Atualiza o estado para liberar o botão
                             onChange={(e) => setHasFiles(!!e.target.files?.length)}
                             className="block w-full text-sm text-slate-700 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-800"
                         />
@@ -529,7 +639,6 @@ export default function AppUploadRoute() {
                         </button>
                         <button
                             type="submit"
-                            // Habilitado se tiver título E arquivos
                             disabled={!canContinue || isSubmitting}
                             className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
                         >
