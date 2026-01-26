@@ -7,22 +7,24 @@ services:
     image: node:20-bookworm-slim
     working_dir: /app
     ports:
-      - "5173:3000"
+      - "3000:3000"
+      - "3001:3001"
 
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "jupiter.local:127.0.0.1"
+
+    env_file:
+      - .env
 
     environment:
-      SUPABASE_URL: ${SUPABASE_URL:?SUPABASE_URL is required}
-      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY is required}
-      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
-      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?VITE_SUPABASE_URL is required}
-      VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:?VITE_SUPABASE_PUBLISHABLE_KEY is required}
       CHOKIDAR_USEPOLLING: "true"
       CHOKIDAR_INTERVAL: "200"
       NPM_CONFIG_UPDATE_NOTIFIER: "false"
       HOST: 0.0.0.0
       PORT: "3000"
+      NODE_ENV: development
+      REMIX_DEV_ORIGIN: "http://jupiter.local:3001"
 
     volumes:
       - .:/app
@@ -32,23 +34,41 @@ services:
       sh -lc "
         set -e;
         echo 'Iniciando Phosio Web...';
-        if [ ! -x ./node_modules/.bin/remix ]; then
+
+        NEED_NPM_CI=0;
+
+        if [ ! -d ./node_modules ] || [ ! -x ./node_modules/.bin/remix ]; then
+          NEED_NPM_CI=1;
+        fi;
+
+        node -e \"require('sharp')\" >/dev/null 2>&1 || NEED_NPM_CI=1;
+
+        if [ \"$$NEED_NPM_CI\" = \"1\" ]; then
+          echo 'Instalando toolchain mínima (para dependências nativas, ex.: sharp)...';
+          apt-get update;
+          apt-get install -y --no-install-recommends python3 make g++;
+          rm -rf /var/lib/apt/lists/*;
+
           echo 'Instalando dependências (npm ci)...';
           npm ci --foreground-scripts --no-audit --no-fund;
         fi;
-        ./node_modules/.bin/remix dev
+
+        exec ./node_modules/.bin/remix dev
       "
+
 
   app-prod:
     container_name: phosio-app-prod
     profiles: ["prod"]
-    build:
-      context: .
-      args:
-        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
-        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
+    build: .
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOST: 0.0.0.0
     ports:
-      - "8080:80"
+      - "8080:3000"
     restart: unless-stopped
 
 volumes:
