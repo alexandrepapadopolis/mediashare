@@ -29,6 +29,7 @@ O Phosio adota uma arquitetura **server-first**, com renderização no servidor 
 - **Sessão gerenciada no servidor**
 - **`.env` como fonte única de configuração**
 - **Docker como ambiente canônico de execução**
+- **Uploads e thumbnails no SSR** (binário + processamento no servidor)
 
 ---
 
@@ -58,6 +59,7 @@ O Phosio adota uma arquitetura **server-first**, com renderização no servidor 
 - Docker
 - Docker Compose v2
 - Supabase CLI (via `npx`)
+- **Sharp (node module)** para geração de thumbnails (server-side)
 
 ---
 
@@ -65,9 +67,10 @@ O Phosio adota uma arquitetura **server-first**, com renderização no servidor 
 
 ### Desenvolvimento (DEV)
 
-- Remix Dev Server
+- Remix Dev Server (dentro do container `phosio-app-dev`)
 - Hot reload (frontend e backend)
-- Porta: http://localhost:3000
+- Porta (host): **http://jupiter.local:3000**  
+  (internamente no container: `http://localhost:3000`)
 
 ### Produção (PROD)
 
@@ -90,6 +93,9 @@ O Phosio adota uma arquitetura **server-first**, com renderização no servidor 
 - `ambiente.ps1` / `ambiente.bat`: orquestração de ambiente (up / down / reset / restart)
 - `docs/`: documentação técnica e histórica
 
+> Observação prática: `.env` é consumido pelo Docker Compose e pelo app no container.  
+> Variáveis não precisam estar exportadas no shell do host para o app funcionar; para testes via `curl` no host, é necessário exportar manualmente (ex.: `source .env` em Bash).
+
 ### Aplicação (Remix)
 
 - `app/`
@@ -97,12 +103,14 @@ O Phosio adota uma arquitetura **server-first**, com renderização no servidor 
     - `_index.tsx`: landing pública
     - `login.tsx`, `signup.tsx`, `verify-email.tsx`
     - `app._index.tsx`: área autenticada (/app)
-    - `app.media.$id.tsx`: detalhe de mídia
-    - `app.upload.tsx`: upload SSR
+    - `app.media.$id.tsx`: detalhe de mídia (SSR + signed URL quando necessário)
+    - `app.upload.tsx`: upload SSR (cria draft + upload binário + patch + thumbnail best-effort)
   - `utils/`
     - `env.server.ts`: leitura e validação de variáveis de ambiente
     - `session.server.ts`: gestão de sessão (cookies httpOnly)
     - `supabase.server.ts`: integração server-side com Supabase
+    - `media.server.ts`: query SSR para listagem
+    - `thumbnail.server.ts`: **geração de thumbnail WebP (sharp)**
   - `tailwind.css`: estilos globais
 
 > O diretório `src/` da SPA original **não faz mais parte da arquitetura ativa**.
@@ -119,6 +127,7 @@ As rotas são definidas **no servidor**, seguindo o modelo file-based routing do
 - `/login` → autenticação
 - `/signup` → criação de conta
 - `/app` → área autenticada
+- `/app/upload` → upload SSR (metadados + arquivos)
 - `/app/media/:id` → detalhe da mídia
 
 ### Proteção de rotas
@@ -154,9 +163,43 @@ As rotas são definidas **no servidor**, seguindo o modelo file-based routing do
 
 ### Storage
 
-- Upload e geração de signed URLs realizados no SSR
-- URLs temporárias com TTL curto
-- Metadados persistidos no banco
+- Upload binário realizado no SSR via `fetch` contra o endpoint do Storage (`/storage/v1/object/...`)
+- Para leitura de objetos:
+  - **Arquivos privados**: rota SSR gera **signed URL** com TTL curto
+  - **Arquivos públicos**: `publicUrl` estável (`/storage/v1/object/public/...`)
+- Metadados de arquivos persistidos no banco (ex.: `metadata.files[]`)
+
+#### Thumbnails (P13-5 / Issue #43)
+
+- Thumbnail é gerado **server-side** via `sharp` (WebP, largura padrão 320).
+- Implementação é **best-effort**:
+  - Se falhar geração ou upload (ex.: restrição de RLS no Storage), **não bloqueia** o upload principal.
+  - Falhas podem ser logadas no server (padrão recomendado: log estruturado `[thumb] ...`).
+
+**Convenção de path (Storage):**
+
+- Objeto original:  
+  `media/<user_id>/<media_id>/<filename>`
+- Thumbnail:  
+  `media/thumbnails/<user_id>/<media_id>/w320.webp`
+
+**Persistência no banco (tabela `public.media`):**
+
+- `thumbnail_url` recebe o `publicUrl` do thumbnail quando gerado.
+- `metadata.thumbnail` recebe estrutura com:
+  - `bucket`, `objectPath`, `publicUrl`
+  - `width`, `height`
+  - `variant` (ex.: `w320-webp`)
+  - `mime_type` (`image/webp`)
+  - `generated_at` (ISO-8601)
+
+**Nota sobre RLS no Storage:**
+
+- Mesmo com bucket configurado como público, o upload pode falhar se as policies do Storage estiverem restritivas.
+- Se ocorrer erro do tipo *"new row violates row-level security policy"*, a ação recomendada é:
+  - Ajustar policy do Storage para permitir `INSERT` do usuário autenticado nos paths esperados (ex.: prefixo `thumbnails/<uid>/...`), **ou**
+  - Mover o upload do thumbnail para um caminho permitido pelas policies existentes, **ou**
+  - Gerar thumbnail via service role em um serviço interno (não via token do usuário), conforme estratégia de hardening.
 
 ---
 
@@ -166,8 +209,16 @@ As rotas são definidas **no servidor**, seguindo o modelo file-based routing do
 - Migrações versionadas em `supabase/migrations/`
 - Entidade central: **media**
   - Associação com usuários
-  - Tags normalizadas
-  - Metadados estruturados (JSONB)
+  - Tags normalizadas (em evolução)
+  - Metadados estruturados (JSONB), incluindo `metadata.files[]` e `metadata.thumbnail`
+
+Campos relevantes para upload + storage:
+
+- `storage_bucket`, `storage_object_path`: referência principal do objeto no Storage
+- `file_path`: compatibilidade/legado (pode ser mantido enquanto houver transição)
+- `original_filename`, `mime_type`, `size_bytes`, `checksum_sha256`
+- `thumbnail_url`: URL pública do thumbnail (quando aplicável)
+- `metadata`: JSONB para extensões incrementais sem churn de schema
 
 O modelo de dados é considerado **estável** e evolui de forma incremental.
 
@@ -183,6 +234,12 @@ Práticas adotadas:
 - Redirecionamento seguro (anti open-redirect)
 - Uso restrito de chaves sensíveis
 - Reset destrutivo explícito (nunca implícito)
+
+Pontos específicos do fluxo de upload:
+
+- Validação server-side de MIME e tamanho máximo por arquivo
+- Cálculo de checksum (SHA-256) durante upload
+- Thumbnails em **best-effort** (não devem degradar a confiabilidade do upload principal)
 
 ---
 
@@ -206,6 +263,8 @@ Evoluções previstas:
 - Rate limiting em autenticação
 - Testes automatizados (unit / integration)
 - Observabilidade (logs estruturados)
+- Thumbnails para vídeo (poster) e reprocessamento assíncrono (quando necessário)
+- Hardening de RLS (DB + Storage) para tornar o bucket efetivamente privado, com signed URLs para acesso
 
 ---
 
@@ -215,3 +274,4 @@ Evoluções previstas:
 - Arquitetura legada (SPA): `ARCHITECTURE-LEGACY.md`
 - Plano histórico de migração: `docs/architecture/phosio-mpa-ssr-plan.full.json`
 - Migrações do banco: `supabase/migrations/*`
+- Implementação de thumbnails: `app/utils/thumbnail.server.ts` e `app/routes/app.upload.tsx`

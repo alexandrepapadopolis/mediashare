@@ -132,3 +132,32 @@ Remover o diretório `src/` da base ativa, mantendo documentação apenas para h
 - Redução de ambiguidade arquitetural
 - Base mais simples e clara
 - Documentação alinhada com o código
+
+---
+
+## ADR-008 — Thumbnails server-side no upload SSR (Sharp + Storage) e persistência em `media.thumbnail_url`/`metadata.thumbnail`
+
+**Status:** Aceito  
+**Data:** 2026
+
+### Contexto
+O detalhe/listagem de mídias precisa de uma imagem leve e estável para pré-visualização, sem depender de:
+- processamento no client (custoso e inconsistente), ou
+- signed URLs curtas do objeto original (expiram e complicam cache/UX).
+
+Além disso, o fluxo de upload já é **SSR** e já persiste metadados em `public.media.metadata.files[]`.
+
+### Decisão
+Gerar **thumbnail no servidor** durante o upload SSR **apenas para imagens**, utilizando **Sharp** (WebP, variante `w320-webp`),
+fazer upload do thumbnail para o **Supabase Storage** (best-effort) e persistir:
+- `public.media.thumbnail_url` com a **URL pública** do thumbnail; e
+- `public.media.metadata.thumbnail` com os metadados do thumbnail (bucket/path/publicUrl/dimensões/variant/timestamp).
+
+O thumbnail é **best-effort**: falhas de geração/upload **não** devem bloquear o upload principal (incluindo vídeo/áudio).
+
+### Consequências
+- UI pode renderizar thumbnails rapidamente via `thumbnail_url` (URL pública, estável).
+- Metadados estruturados do thumbnail ficam disponíveis para evolução (múltiplas variantes/tamanhos).
+- Dependência adicional: **Sharp** no ambiente server-side (container Node).
+- Requer atenção às políticas do **Storage**: operações de upload precisam estar compatíveis com RLS/policies do bucket/objeto
+  (ex.: paths sob `thumbnails/...` devem ser permitidos para o usuário autenticado), sob pena de `new row violates row-level security policy`.

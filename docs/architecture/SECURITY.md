@@ -165,6 +165,33 @@ location = /login {
 
 ---
 
+## 8-A. Thumbnails server-side (SSR) e políticas de Storage
+
+### Contexto
+O upload de thumbnails é realizado **no servidor (SSR)** durante o fluxo de upload de mídias,
+utilizando **Sharp** para geração e **Supabase Storage** para persistência.
+
+Os thumbnails:
+- são gerados apenas para **imagens**;
+- são **best-effort** (falhas não bloqueiam o upload principal);
+- são armazenados em paths dedicados (`thumbnails/<user_id>/<media_id>/w320.webp`);
+- utilizam **URL pública estável** quando o bucket é público.
+
+### Requisitos de segurança
+- As **policies de Storage (RLS)** devem permitir explicitamente:
+  - `INSERT`/`UPSERT` no prefixo `thumbnails/**` para o usuário autenticado; e
+  - leitura pública apenas se o bucket for intencionalmente público.
+- Caso o bucket seja **privado**, o acesso ao thumbnail deve ocorrer via **signed URL** gerada no SSR.
+- O SSR **não deve** usar `SUPABASE_SERVICE_ROLE_KEY` para upload de thumbnails em produção pública;
+  o fluxo deve funcionar corretamente com **anon key + access token** do usuário.
+
+### Riscos mitigados
+- Escrita indevida em paths arbitrários do bucket.
+- Escalada de privilégios via uso incorreto de service role.
+- Exposição acidental de thumbnails se o bucket não for público por design.
+
+---
+
 ## 8. Upload/Storage hardening
 
 - Validar **MIME**, tamanho, e número de arquivos no servidor.
@@ -172,6 +199,7 @@ location = /login {
 - Considerar **limites por usuário** (quota diária/mensal).
 - Sanitizar nomes de arquivos e paths.
 - Evitar exposição de bucket público; preferir private + signed URL.
+- Garantir que paths auxiliares (ex.: `thumbnails/`) estejam cobertos por policies explícitas.
 
 ---
 
@@ -227,5 +255,6 @@ Este documento foi elaborado para produção pública e **pode exigir pequenos a
 - centralizar headers no Remix (root/entry server) ou no Nginx
 - implementar CSRF token em forms SSR
 - configurar rate limiting no reverse proxy
+- revisar policies de Storage sempre que novos prefixes/variants (ex.: thumbnails) forem introduzidos
 
 A recomendação é implementar por etapas, com PRs pequenos e testes manuais em ambiente de staging.
