@@ -1,34 +1,37 @@
 # Phosio
 
-Phosio é uma aplicação web para **catálogo e gerenciamento de mídias**, organizada por categorias, construída com **React + Vite + TypeScript** e integrada ao **Supabase** (Auth, Database, Storage e APIs).
+Phosio é uma aplicação web para **catálogo e gerenciamento de mídias**, organizada por categorias (fotos, vídeos e áudios), construída com **Remix (React + TypeScript, SSR/MPA)** e integrada ao **Supabase** para autenticação, banco de dados, storage e APIs.
 
-O projeto é totalmente executável em ambiente local usando **Docker**, com separação clara entre **ambiente de desenvolvimento (hot reload)** e **ambiente de produção (build + Nginx)**.
+O projeto foi originalmente concebido como uma SPA, mas encontra-se **em migração completa para uma arquitetura de múltiplas páginas com renderização no servidor (SSR)**, priorizando segurança, previsibilidade de ambiente e isolamento de infraestrutura.
+
+A execução local é feita de forma **reprodutível via Docker**, com separação clara entre **ambiente de desenvolvimento** e **ambiente de produção**.
 
 ---
 
 ## Arquitetura
 
-- **Frontend**
-  - Vite
-  - React 18
-  - TypeScript
-  - Tailwind CSS + shadcn/ui
-  - React Router
-  - TanStack React Query
+### Frontend / Web
+- Remix 2 (SSR / MPA)
+- React 18
+- TypeScript
+- Tailwind CSS + shadcn/ui
+- Renderização no servidor (Node.js)
+- Rotas protegidas via loaders/actions (SSR)
 
-- **Backend (BaaS)**
-  - Supabase (local via Docker)
-    - Postgres
-    - Auth
-    - Storage
-    - PostgREST
-    - Realtime
-    - Kong API Gateway
+### Backend (BaaS)
+- Supabase (executado localmente via Docker)
+  - Postgres
+  - Auth
+  - Storage
+  - PostgREST
+  - Realtime
+  - Kong API Gateway
 
-- **Infra**
-  - Docker
-  - Docker Compose
-  - Nginx (produção)
+### Infraestrutura
+- Docker
+- Docker Compose (v2)
+- Node.js 20 (runtime)
+- Nginx (somente para cenários externos; não obrigatório no fluxo padrão)
 
 ---
 
@@ -36,19 +39,21 @@ O projeto é totalmente executável em ambiente local usando **Docker**, com sep
 
 - Docker Desktop (com Docker Compose v2)
 - Git
-- Node.js 20+ (opcional, apenas se rodar fora do container)
+- Node.js 20+ (opcional; apenas fora do container)
 
 ---
 
 ## Estrutura de ambientes
 
 ### Desenvolvimento (DEV)
-- Vite com hot reload
-- Porta: http://localhost:5173
+- Remix Dev Server (SSR)
+- Hot reload
+- Porta: http://localhost:3000
 
 ### Produção (PROD)
-- Build estático servido via Nginx
-- Porta: http://localhost:8080
+- Build do Remix executado em Node.js
+- Porta externa: http://localhost:8080
+- Container expõe internamente a porta 3000
 
 ---
 
@@ -56,69 +61,74 @@ O projeto é totalmente executável em ambiente local usando **Docker**, com sep
 
 As variáveis de ambiente **não são versionadas**.
 
-Crie um arquivo `.env` na raiz do projeto.
+O projeto utiliza **exclusivamente o arquivo `.env` local**, localizado na raiz do repositório.
 
 ### Exemplo (`.env.example`)
 
+```env
+MEDIA_PATH=E:/mediashare-files
+
+SUPABASE_URL=http://host.docker.internal:54321
+SUPABASE_ANON_KEY=sb_publishable__REPLACE_ME__
+SUPABASE_SERVICE_ROLE_KEY=sb_secret__REPLACE_ME__
+
+SUPABASE_STORAGE_BUCKET=media
+MEDIASHARE_SYSTEM_USER_ID=__REPLACE_ME_UUID__
+
+SESSION_SECRET=__GENERATE_STRONG_SECRET__
 ```
-VITE_SUPABASE_URL=http://127.0.0.1:54321
-VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxxxxxxxxxxxxxxxx
-```
 
-Copie para `.env` e ajuste conforme necessário.
-
-> Não utilize variáveis globais do sistema (setx / export).  
-> O projeto foi projetado para usar exclusivamente o `.env` local.
-
----
-
-## Supabase local
-
-O Supabase roda localmente via Docker, incluindo:
-
-- API Gateway (Kong): http://localhost:54321
-- Supabase Studio: http://localhost:54323
-- Postgres interno
-
-Suba o Supabase antes do frontend.
+> Nunca exponha `SUPABASE_SERVICE_ROLE_KEY` no frontend.
 
 ---
 
 ## Subindo o projeto
 
-### Usando script de ambiente (recomendado)
-
-#### DEV
-```
+### Desenvolvimento
+```bash
 ambiente up dev
 ```
 
-Acesse:
-http://localhost:5173
+Acesse: http://localhost:3000
 
-#### PROD
-```
+### Produção
+```bash
 ambiente up prod
 ```
 
-Acesse:
-http://localhost:8080
+Acesse: http://localhost:8080
 
-### Encerrar tudo
-```
+---
+
+## Encerrando o ambiente
+```bash
 ambiente down dev
+```
+
+---
+
+## Reset completo (destrutivo)
+```bash
+ambiente reset dev
+```
+
+---
+
+## Reiniciar somente a aplicação
+```bash
+ambiente restart dev
 ```
 
 ---
 
 ## Rodando sem Docker (opcional)
 
-```
+```bash
 npm install
 npm run dev
 ```
 
-O Supabase ainda deve estar rodando via Docker.
+O Supabase ainda precisa estar ativo via Docker.
 
 ---
 
@@ -126,28 +136,19 @@ O Supabase ainda deve estar rodando via Docker.
 
 - npm run dev
 - npm run build
-- npm run preview
+- npm run start
 - npm run lint
 
 ---
 
 ## Troubleshooting
 
-### Frontend tenta acessar localhost:8000
-Causa: variável de ambiente incorreta.
-
-Solução:
-- Verifique `.env`
-- Use `VITE_SUPABASE_URL=http://127.0.0.1:54321`
-- Suba o ambiente via script
-
 ### Dados não carregam
 - Verifique se o Supabase está ativo
-- Verifique Kong (porta 54321)
+- Confirme `SUPABASE_URL`
 
 ### Porta em uso
-Finalize ambientes com:
-```
+```bash
 ambiente down dev
 ```
 
@@ -155,10 +156,10 @@ ambiente down dev
 
 ## Boas práticas adotadas
 
-- Isolamento total de plataformas externas
 - `.env` como fonte única de verdade
+- SSR por padrão
 - Separação DEV / PROD
-- Infra reproduzível com Docker
+- Infraestrutura reproduzível
 
 ---
 

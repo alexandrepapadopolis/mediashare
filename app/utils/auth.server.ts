@@ -2,7 +2,7 @@
 import { redirect, json } from "@remix-run/node";
 import { createSupabaseServerClient } from "./supabase.server";
 import { createAuthSession, destroySession, getAccessToken, getSession } from "./session.server";
-import { getEnv } from "./env.server";
+import { getServerEnv } from "./env.server";
 
 // Login email/senha (server action)
 export async function signInWithPassword(request: Request, email: string, password: string) {
@@ -26,7 +26,7 @@ export async function signInWithPassword(request: Request, email: string, passwo
 
 // Signup email/senha + redirect de confirmação
 export async function signUpWithEmail(request: Request, email: string, password: string, username?: string) {
-  const env = getEnv();
+  const env = getServerEnv();
   const supabase = createSupabaseServerClient();
 
   const emailRedirectTo = `${env.APP_ORIGIN ?? new URL(request.url).origin}/verify-email`;

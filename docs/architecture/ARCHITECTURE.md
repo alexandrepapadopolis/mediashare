@@ -1,197 +1,217 @@
-# Phosio — Arquitetura (Atual) e Direção de Evolução (SSR/MPA)
+# Phosio — Arquitetura (Estado Atual)
 
 ## 1. Objetivo deste documento
 
-Este **ARCHITECTURE.md** descreve:
+Este **ARCHITECTURE.md** descreve a **arquitetura atual e efetivamente implementada** do projeto **Phosio**, após a migração da base original (SPA) para um modelo **SSR / MPA**, utilizando **Remix** como framework principal.
 
-1) **Como o repositório está estruturado hoje** (stack, pastas, execução, rotas e integrações).  
-2) A **direção arquitetural** definida para atender ao requisito de **não-SPA** (MPA/SSR), com um plano incremental.
+Este documento tem como objetivos:
 
-Este arquivo é a leitura “humana” do plano detalhado em:
+- Documentar **como o sistema funciona hoje**
+- Servir como **referência técnica confiável** para manutenção e evolução
+- Evitar divergência entre documentação e código
 
-- `docs/architecture/phosio-mpa-ssr-plan.full.json`
+A arquitetura **SPA original** não faz mais parte do sistema ativo.  
+Ela foi preservada **apenas para fins históricos** no arquivo:
 
----
-
-## 2. Stack e execução (estado atual)
-
-### Frontend
-- **React 18 + Vite + TypeScript**
-- **Tailwind CSS + shadcn/ui**
-- **React Router** (SPA)
-- **TanStack React Query** (data fetching/cache)
-
-### Backend/BaaS
-- **Supabase local via Docker** (Auth, Postgres, Storage, PostgREST, Realtime, Kong)
-
-### Infra / execução
-- DEV: Vite HMR em `http://localhost:5173`
-- PROD: build estático servido via **Nginx** em `http://localhost:8080`
-- Scripts principais:
-  - `npm run dev`
-  - `npm run build`
-  - `npm run preview`
-  - `npm run lint`
+➡ **`ARCHITECTURE-LEGACY.md` (Apêndice histórico)**
 
 ---
 
-## 3. Estrutura do repositório (estado atual)
+## 2. Visão arquitetural (atual)
+
+O Phosio adota uma arquitetura **server-first**, com renderização no servidor e responsabilidades claramente separadas entre **cliente**, **servidor** e **infraestrutura**.
+
+### Princípios fundamentais
+
+- **Não-SPA**: navegação baseada em múltiplas páginas (MPA)
+- **SSR por padrão**: HTML renderizado no servidor
+- **Supabase como BaaS** (Auth, Database, Storage)
+- **Sessão gerenciada no servidor**
+- **`.env` como fonte única de configuração**
+- **Docker como ambiente canônico de execução**
+
+---
+
+## 3. Stack tecnológica
+
+### Aplicação Web
+
+- Remix 2 (SSR / MPA)
+- React 18
+- TypeScript
+- Tailwind CSS
+- shadcn/ui (Radix UI)
+
+### Backend (BaaS)
+
+- Supabase (executado localmente via Docker)
+  - Postgres
+  - Auth
+  - Storage
+  - PostgREST
+  - Realtime
+  - Kong API Gateway
+
+### Infraestrutura
+
+- Node.js 20
+- Docker
+- Docker Compose v2
+- Supabase CLI (via `npx`)
+
+---
+
+## 4. Execução por ambiente
+
+### Desenvolvimento (DEV)
+
+- Remix Dev Server
+- Hot reload (frontend e backend)
+- Porta: http://localhost:3000
+
+### Produção (PROD)
+
+- Build do Remix executado em Node.js
+- Mesmo modelo SSR do DEV
+- Porta externa: http://localhost:8080
+- Container expõe internamente a porta 3000
+
+> DEV e PROD compartilham a **mesma arquitetura**; apenas o modo de execução difere.
+
+---
+
+## 5. Estrutura do repositório (atual)
 
 ### Raiz
-- `docker-compose.yml`, `Dockerfile`, `nginx.conf`: infra e execução (DEV/PROD)
-- `.env` / `.env.example`: configuração local (Supabase URL e publishable key)
-- `ambiente.bat` / `ambiente.ps1`: scripts para subir/descer o ambiente com Docker
-- `dist/`: artefatos de build (produção)
-- `docs/`: documentação do projeto
-  - `docs/acesso-rede-local.md`
-  - `docs/remocao-lovable.md`
-  - `docs/architecture/ARCHITECTURE.md` (este arquivo)
-  - `docs/architecture/phosio-mpa-ssr-plan.full.json` (plano detalhado)
 
-### Aplicação (SPA)
-- `src/main.tsx`: bootstrap do React (entrypoint)
-- `src/App.tsx`: composição principal da aplicação e roteamento
-- `src/pages/`:
-  - `Index.tsx`: página inicial do app (catálogo/listagem)
-  - `Upload.tsx`: upload de mídia
-  - `Auth.tsx`: autenticação (tela/fluxo atual)
-  - `NotFound.tsx`: 404
-- `src/components/`:
-  - `Header.tsx`: cabeçalho/navegação
-  - `MediaGrid.tsx`, `MediaCard.tsx`, `MediaViewer.tsx`: UI principal de catálogo e visualização
-  - `CategoryFilter.tsx`: filtros/categorias
-  - `UploadForm.tsx`: formulário de upload
-  - `ui/`: componentes shadcn/ui (Radix UI)
-- `src/hooks/`:
-  - `useAuth.tsx`: estado/integração de autenticação
-  - `useMedia.tsx`: queries e manipulação de mídia
-  - `use-toast.ts`, `use-mobile.tsx`: utilitários de UI/UX
-- `src/integrations/supabase/`:
-  - `client.ts`: inicialização do client Supabase (browser)
-  - `types.ts`: types gerados/definidos para Supabase
-- `src/db/init/01-base-media-share.sql`: bootstrap/SQL base (legado de inicialização)
-- `supabase/migrations/`: esquema e evolução do banco (tags normalizadas, checks etc.)
+- `docker-compose.yml`: definição dos serviços (app-dev / app-prod)
+- `Dockerfile`: build da aplicação
+- `.env` / `.env.example`: configuração local (server-only)
+- `ambiente.ps1` / `ambiente.bat`: orquestração de ambiente (up / down / reset / restart)
+- `docs/`: documentação técnica e histórica
+
+### Aplicação (Remix)
+
+- `app/`
+  - `routes/`: rotas SSR
+    - `_index.tsx`: landing pública
+    - `login.tsx`, `signup.tsx`, `verify-email.tsx`
+    - `app._index.tsx`: área autenticada (/app)
+    - `app.media.$id.tsx`: detalhe de mídia
+    - `app.upload.tsx`: upload SSR
+  - `utils/`
+    - `env.server.ts`: leitura e validação de variáveis de ambiente
+    - `session.server.ts`: gestão de sessão (cookies httpOnly)
+    - `supabase.server.ts`: integração server-side com Supabase
+  - `tailwind.css`: estilos globais
+
+> O diretório `src/` da SPA original **não faz mais parte da arquitetura ativa**.
 
 ---
 
-## 4. Rotas e fluxo do usuário (estado atual)
+## 6. Rotas e navegação
 
-### Rotas SPA (React Router)
-As rotas são definidas no frontend (ex.: em `src/App.tsx`), tipicamente incluindo:
+As rotas são definidas **no servidor**, seguindo o modelo file-based routing do Remix.
 
-- Página principal do app (catálogo): `src/pages/Index.tsx`
-- Upload: `src/pages/Upload.tsx`
-- Autenticação: `src/pages/Auth.tsx`
-- Não encontrado: `src/pages/NotFound.tsx`
+### Exemplos de rotas
 
-### Fluxo atual (alto nível)
-- Usuário acessa a SPA e navega via React Router
-- Autenticação e sessão são gerenciadas no cliente (via `useAuth` e Supabase JS)
-- Dados de mídia são consultados/atualizados via Supabase (client-side) e React Query
+- `/` → landing pública
+- `/login` → autenticação
+- `/signup` → criação de conta
+- `/app` → área autenticada
+- `/app/media/:id` → detalhe da mídia
 
----
+### Proteção de rotas
 
-## 5. Autenticação e sessão (estado atual)
-
-- A integração com Supabase Auth existe e é consumida no **browser** (Supabase JS).
-- Padrão típico neste modelo: sessão/token acessível no cliente (dependendo da implementação do `useAuth`).
-- Proteção de rotas, quando existe, tende a ocorrer no frontend (route guards).
-
-Implicação: embora funcione, este modelo tem limitações para:
-- SEO (conteúdo principal depende de JS)
-- Segurança (superfície maior no cliente)
-- Controle de cache/performance (renderização no navegador)
+- Validação de sessão ocorre nos **loaders SSR**
+- Usuários não autenticados são redirecionados para `/login`
+- Tokens **não são expostos ao cliente**
 
 ---
 
-## 6. Modelo de dados e tags (estado atual)
+## 7. Autenticação e sessão
 
-O repositório inclui migrações Supabase em `supabase/migrations/`, incluindo normalização de tags e checks.  
-Isso indica que o domínio “mídias + tags” é parte central do produto e deve ser preservado e aprofundado na evolução do app.
+- Autenticação baseada no **Supabase Auth**
+- Sessão persistida via **cookies httpOnly**
+- Tokens manipulados apenas no servidor
+- Não há uso de `localStorage` para sessão
 
----
+### Benefícios
 
-## 7. Direção de evolução: SSR/MPA (não-SPA)
-
-### Meta
-Atender aos requisitos funcionais e não funcionais do produto **Phosio**:
-
-- **Não ser SPA**
-- Adotar **SSR/MPA**
-- Melhorar SEO, performance e segurança
-- Manter Supabase como BaaS
-- Introduzir rotas dedicadas:
-  - `/` (landing pública)
-  - `/login`, `/signup`, `/verify-email`
-  - `/app` (área autenticada)
-
-### Abordagem recomendada
-- Migrar para **Remix** (SSR-first), por alinhamento com React Router e suporte natural a loaders/actions.
-- Gerenciar sessão via **cookies httpOnly** no servidor (evitar tokens em `localStorage`).
-- Executar app SSR em Node.js; Nginx passa a ser reverse proxy (e não apenas server estático).
-
-### Organização esperada (pós-migração)
-- Criar diretório `app/` (Remix) com rotas SSR:
-  - `app/routes/_index.tsx` (landing)
-  - `app/routes/login.tsx`
-  - `app/routes/signup.tsx`
-  - `app/routes/verify-email.tsx`
-  - `app/routes/app._index.tsx` (/app)
-  - `app/routes/app.media.$id.tsx` (detalhe)
-- Criar utilitários server-side:
-  - `app/utils/supabase.server.ts`
-  - `app/utils/auth.server.ts`
-
-Observação: esta estrutura ainda **não está implementada** na base atual; ela é o alvo arquitetural do plano.
+- Menor superfície de ataque
+- Melhor controle de expiração
+- Comportamento consistente entre DEV e PROD
 
 ---
 
-## 8. Segurança (alvo para SSR/MPA)
+## 8. Integração com Supabase
 
-Regras mínimas a cumprir na migração:
+### Banco e APIs
 
-- Sessão via cookie **httpOnly**, `Secure` em produção e `SameSite` apropriado
-- Proteção de rotas no servidor (redirect para `/login` quando não autenticado)
-- Validação de inputs no servidor (forms e querystrings)
-- Headers de segurança (CSP, Referrer-Policy, Permissions-Policy)
-- Proteção CSRF para actions SSR
-- Rate limiting básico em endpoints sensíveis (login, reenvio de verificação)
+- Chamadas ao PostgREST feitas **exclusivamente no servidor**
+- Autorização via `SUPABASE_ANON_KEY` + token de sessão
+- Operações administrativas utilizam `SUPABASE_SERVICE_ROLE_KEY` (server-only)
+
+### Storage
+
+- Upload e geração de signed URLs realizados no SSR
+- URLs temporárias com TTL curto
+- Metadados persistidos no banco
 
 ---
 
-## 9. UX e acessibilidade (alvo)
+## 9. Modelo de dados
+
+- Banco Postgres gerenciado pelo Supabase
+- Migrações versionadas em `supabase/migrations/`
+- Entidade central: **media**
+  - Associação com usuários
+  - Tags normalizadas
+  - Metadados estruturados (JSONB)
+
+O modelo de dados é considerado **estável** e evolui de forma incremental.
+
+---
+
+## 10. Segurança
+
+Práticas adotadas:
+
+- Cookies `httpOnly`
+- Separação clara entre client e server
+- Validação de inputs no servidor
+- Redirecionamento seguro (anti open-redirect)
+- Uso restrito de chaves sensíveis
+- Reset destrutivo explícito (nunca implícito)
+
+---
+
+## 11. UX e acessibilidade
 
 - Mobile-first
-- WCAG AA como referência mínima
-- Navegação por teclado e foco visível
-- Mensagens de erro claras e contextualizadas
-- Estados consistentes: loading / empty / error
-- Consistência visual: reaproveitar `src/components/ui` (shadcn) sempre que possível
+- HTML semântico renderizado no servidor
+- Estados claros: loading / empty / error
+- Componentes reutilizáveis via shadcn/ui
+- Base preparada para WCAG AA
 
 ---
 
-## 10. Estratégia de execução (resumo)
+## 12. Estratégia de evolução
 
-O plano detalhado define passos P01–P12. A ordem recomendada para reduzir retrabalho é:
+A base atual já cumpre os requisitos de **SSR / MPA**.
 
-1. P01 — Inventário técnico (rotas, hooks, supabase, modelo de dados)
-2. P02 — Bootstrap SSR (Remix) preservando Tailwind/shadcn
-3. P03 — Auth SSR com cookies e proteção server-side
-4. P04 — Landing pública (Phosio)
-5. P05–P08 — Auth pages + /app (catálogo) + detalhe com relacionados
-6. P09–P12 — Hardening de segurança + testes
+Evoluções previstas:
+
+- Hardening de headers de segurança
+- Rate limiting em autenticação
+- Testes automatizados (unit / integration)
+- Observabilidade (logs estruturados)
 
 ---
 
-## 11. Referências no repositório
+## 13. Referências
 
-- Plano detalhado: `docs/architecture/phosio-mpa-ssr-plan.full.json`
-- README (execução/ambientes): `README.md`
-- SPA atual:
-  - `src/main.tsx`
-  - `src/App.tsx`
-  - `src/pages/*`
-  - `src/integrations/supabase/client.ts`
-- Banco/migrações:
-  - `supabase/migrations/*`
-
+- Execução e ambientes: `README.md`
+- Arquitetura legada (SPA): `ARCHITECTURE-LEGACY.md`
+- Plano histórico de migração: `docs/architecture/phosio-mpa-ssr-plan.full.json`
+- Migrações do banco: `supabase/migrations/*`

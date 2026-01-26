@@ -10,7 +10,7 @@ import {
   useSearchParams,
 } from "@remix-run/react";
 
-import { getEnv } from "../utils/env.server";
+import { getServerEnv } from "../utils/env.server";
 import { getSession, destroySession } from "../utils/session.server";
 
 type MediaDetail = {
@@ -54,9 +54,9 @@ async function fetchMediaById(args: {
   id: string;
   accessToken: string;
 }): Promise<MediaDetail | null> {
-  const env = getEnv();
-  const supabaseUrl = env.VITE_SUPABASE_URL;
-  const supabaseAnonKey = env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  const env = getServerEnv();
+  const supabaseUrl = env.SUPABASE_URL;
+  const supabaseAnonKey = env.SUPABASE_ANON_KEY;
 
   const url = new URL(`${supabaseUrl}/rest/v1/${MEDIA_RESOURCE}`);
   url.searchParams.set("id", `eq.${args.id}`);
@@ -108,9 +108,9 @@ async function createSignedUrl(args: {
   objectPath: string;
   expiresInSeconds: number;
 }): Promise<string> {
-  const env = getEnv();
-  const supabaseUrl = env.VITE_SUPABASE_URL;
-  const supabaseAnonKey = env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  const env = getServerEnv();
+  const supabaseUrl = env.SUPABASE_URL;
+  const supabaseAnonKey = env.SUPABASE_ANON_KEY;
 
   const encodedPath = encodeObjectPathPreservingSlashes(args.objectPath);
 

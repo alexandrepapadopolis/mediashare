@@ -5,7 +5,7 @@
     "baseUrl": ".",
     "paths": {
       "~/*": ["./app/*"],
-      "@/*": ["./src/*"]
+      "@/*": ["./app/*"]
     },
     "noImplicitAny": false,
     "noUnusedParameters": false,

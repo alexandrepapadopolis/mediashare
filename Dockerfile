@@ -2,9 +2,6 @@
 FROM node:20-bookworm-slim AS build
 WORKDIR /app
 
-ARG VITE_SUPABASE_URL
-ARG VITE_SUPABASE_PUBLISHABLE_KEY
-
 # evita o aviso de update do npm
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 
@@ -19,20 +16,29 @@ COPY package.json package-lock.json* ./
 
 # Instalação determinística se houver lockfile
 RUN if [ -f package-lock.json ]; then \
-      npm ci --foreground-scripts --no-audit --no-fund; \
-    else \
-      npm install --foreground-scripts --no-audit --no-fund; \
-    fi
+    npm ci --foreground-scripts --no-audit --no-fund; \
+  else \
+    npm install --foreground-scripts --no-audit --no-fund; \
+  fi
 
 # Copia o restante do projeto
 COPY . .
 
-# Build do Vite com variáveis somente em build-time (não persiste ENV na imagem)
-RUN VITE_SUPABASE_URL="$VITE_SUPABASE_URL" \
-    VITE_SUPABASE_PUBLISHABLE_KEY="$VITE_SUPABASE_PUBLISHABLE_KEY" \
-    npm run build
+# Build do Remix (SSR)
+RUN npm run build
 
-# runtime
-FROM nginx:1.27-alpine
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/dist /usr/share/nginx/html
+# runtime (Node)
+FROM node:20-bookworm-slim AS runtime
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
+
+# Copia runtime mínimo
+COPY --from=build /app/package.json /app/package-lock.json* /app/
+COPY --from=build /app/node_modules /app/node_modules
+COPY --from=build /app/build /app/build
+COPY --from=build /app/public /app/public
+
+EXPOSE 3000
+CMD ["npm","run","start"]
