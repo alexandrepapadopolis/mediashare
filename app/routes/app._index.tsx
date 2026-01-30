@@ -15,12 +15,41 @@ import {
   getSession,
   requireAccessToken,
 } from "../utils/session.server";
+import { getServerEnv } from "../utils/env.server";
 import { createSupabaseServerClientWithAccessToken } from "../utils/supabase.server";
 import {
   isInvalidAuthError,
   parseMediaQuery,
   queryMedia,
 } from "../utils/media.server";
+
+function normalizeThumbUrl(input: unknown, publicBaseNoSlash: string): string | null {
+  if (!input || typeof input !== "string") return null;
+
+  const raw = input.trim();
+  if (!raw) return null;
+
+  // Absoluto: reescreve host/protocol para o publicBase
+  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+    try {
+      const u = new URL(raw);
+      const p = new URL(publicBaseNoSlash);
+      u.protocol = p.protocol;
+      u.host = p.host;
+      return u.toString();
+    } catch {
+      return raw;
+    }
+  }
+
+  // Relativo com / no início
+  if (raw.startsWith("/")) {
+    return `${publicBaseNoSlash}${raw}`;
+  }
+
+  // Relativo sem /: torna absoluto no publicBase
+  return `${publicBaseNoSlash}/${raw}`;
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const accessToken = await requireAccessToken(request);
@@ -43,9 +72,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   try {
     const result = await queryMedia({ supabase, input });
+
+    // IMPORTANT: thumbs precisam ser acessíveis pelo BROWSER.
+    // Portanto, sempre usar a base pública (SUPABASE_PUBLIC_URL).
+    const env = getServerEnv();
+    const publicBaseNoSlash = String(env.SUPABASE_PUBLIC_URL || env.SUPABASE_URL).replace(
+      /\/+$/,
+      ""
+    );
+
+    const items = Array.isArray((result as any).items) ? (result as any).items : [];
+    const patchedItems = items.map((it: any) => {
+      const fixedThumb = normalizeThumbUrl(it?.thumbnail_url, publicBaseNoSlash);
+      return {
+        ...it,
+        thumbnail_url: fixedThumb,
+      };
+    });
+
     return json({
       userEmail: data.user.email ?? null,
       ...result,
+      items: patchedItems,
     });
   } catch (err) {
     // Token pode expirar entre getUser() e query
@@ -109,7 +157,6 @@ export default function AppIndexRoute() {
     );
   }
 
-
   return (
     <div className="space-y-6">
       {isLoading ? (
@@ -119,8 +166,7 @@ export default function AppIndexRoute() {
         <h1 className="text-xl font-semibold">Catálogo (placeholder SSR)</h1>
 
         <p className="mt-2 text-sm text-muted-foreground">
-          Próximo passo: listar mídias do Supabase, filtros por tags, busca e
-          paginação.
+          Próximo passo: listar mídias do Supabase, filtros por tags, busca e paginação.
         </p>
 
         <p className="mt-2 text-xs text-muted-foreground">
@@ -131,9 +177,7 @@ export default function AppIndexRoute() {
         <Form method="get" className="mt-4 space-y-3">
           <div className="grid gap-3 md:grid-cols-3">
             <div className="md:col-span-2">
-              <label className="text-xs font-medium text-muted-foreground">
-                Busca
-              </label>
+              <label className="text-xs font-medium text-muted-foreground">Busca</label>
               <input
                 type="search"
                 name="q"
@@ -144,9 +188,7 @@ export default function AppIndexRoute() {
             </div>
 
             <div>
-              <label className="text-xs font-medium text-muted-foreground">
-                Tags (CSV)
-              </label>
+              <label className="text-xs font-medium text-muted-foreground">Tags (CSV)</label>
               <input
                 name="tags"
                 defaultValue={appliedFilters.tags.join(",")}
@@ -157,11 +199,7 @@ export default function AppIndexRoute() {
           </div>
 
           {/* page reset implícito: não enviar page */}
-          <input
-            type="hidden"
-            name="pageSize"
-            value={String(appliedFilters.pageSize)}
-          />
+          <input type="hidden" name="pageSize" value={String(appliedFilters.pageSize)} />
 
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -204,8 +242,9 @@ export default function AppIndexRoute() {
             to={buildPageHref(appliedFilters.page - 1)}
             prefetch="intent"
             aria-disabled={!hasPrev}
-            className={`rounded-xl border px-4 py-2 text-sm ${!hasPrev ? "pointer-events-none opacity-50" : ""
-              }`}
+            className={`rounded-xl border px-4 py-2 text-sm ${
+              !hasPrev ? "pointer-events-none opacity-50" : ""
+            }`}
           >
             Anterior
           </Link>
@@ -219,8 +258,9 @@ export default function AppIndexRoute() {
             to={buildPageHref(appliedFilters.page + 1)}
             prefetch="intent"
             aria-disabled={!hasNext}
-            className={`ml-auto rounded-xl border px-4 py-2 text-sm ${!hasNext ? "pointer-events-none opacity-50" : ""
-              }`}
+            className={`ml-auto rounded-xl border px-4 py-2 text-sm ${
+              !hasNext ? "pointer-events-none opacity-50" : ""
+            }`}
           >
             Próxima
           </Link>
@@ -237,36 +277,33 @@ export default function AppIndexRoute() {
       <div className="grid gap-4 md:grid-cols-3">
         {items.length === 0
           ? Array.from({ length: 9 }).map((_, i) => (
-            <div key={i} className="rounded-2xl border bg-white p-4">
-              <div className="aspect-video rounded-lg bg-muted" />
-              <div className="mt-3 h-4 w-2/3 rounded bg-muted" />
-              <div className="mt-2 h-3 w-1/2 rounded bg-muted" />
-            </div>
-          ))
+              <div key={i} className="rounded-2xl border bg-white p-4">
+                <div className="aspect-video rounded-lg bg-muted" />
+                <div className="mt-3 h-4 w-2/3 rounded bg-muted" />
+                <div className="mt-2 h-3 w-1/2 rounded bg-muted" />
+              </div>
+            ))
           : items.map((it) => (
-            <Link
-              key={it.id}
-              to={buildDetailHref(it.id)}
-              prefetch="intent"
-              className="block rounded-2xl border bg-white p-4 hover:bg-muted/40"
-              aria-label={`Abrir detalhes: ${it.title ?? "mídia"}`}
-            >
-              <div className="aspect-video overflow-hidden rounded-lg bg-muted">
-                {it.thumbnail_url ? (
-                  <MediaThumb
-                    src={it.thumbnail_url}
-                    alt={it.title ?? "Thumbnail"}
-                  />
-                ) : (
-                  <div className="h-full w-full" />
-                )}
-              </div>
-              <div className="mt-3 text-sm font-medium">{it.title}</div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {it.media_type} • {formatDateTime(it.created_at)}
-              </div>
-            </Link>
-          ))}
+              <Link
+                key={it.id}
+                to={buildDetailHref(it.id)}
+                prefetch="intent"
+                className="block rounded-2xl border bg-white p-4 hover:bg-muted/40"
+                aria-label={`Abrir detalhes: ${it.title ?? "mídia"}`}
+              >
+                <div className="aspect-video overflow-hidden rounded-lg bg-muted">
+                  {it.thumbnail_url ? (
+                    <MediaThumb src={it.thumbnail_url} alt={it.title ?? "Thumbnail"} />
+                  ) : (
+                    <div className="h-full w-full" />
+                  )}
+                </div>
+                <div className="mt-3 text-sm font-medium">{it.title}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {it.media_type} • {formatDateTime(it.created_at)}
+                </div>
+              </Link>
+            ))}
       </div>
     </div>
   );

@@ -11,7 +11,11 @@ import {
 } from "@remix-run/react";
 
 import { getServerEnv } from "../utils/env.server";
-import { getSession, destroySession } from "../utils/session.server";
+import { destroySession, getSession } from "../utils/session.server";
+
+/* ============================================================
+ * Types
+ * ============================================================ */
 
 type MediaDetail = {
   id: string;
@@ -22,10 +26,8 @@ type MediaDetail = {
   tags: unknown;
   thumbnail_url?: string | null;
 
-  // P13-2 armazena múltiplos arquivos em metadata.files[]
   metadata: unknown;
 
-  // Campos relevantes para Storage (P13-2 já preenche)
   storage_bucket: string | null;
   storage_object_path: string | null;
 
@@ -34,9 +36,21 @@ type MediaDetail = {
   size_bytes: number | null;
 };
 
-const MEDIA_RESOURCE = "media";
+type SignedFile = {
+  bucket: string;
+  path: string;
+  signedUrl: string;
+  mime_type: string | null;
+  original_filename: string;
+  size_bytes: number | null;
+};
 
+const MEDIA_RESOURCE = "media";
 const SIGNED_URL_TTL_SECONDS = 120;
+
+/* ============================================================
+ * Utils
+ * ============================================================ */
 
 function isValidUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -45,128 +59,11 @@ function isValidUuid(value: string): boolean {
 }
 
 function encodeObjectPathPreservingSlashes(path: string): string {
+  // preserva "/" e escapa cada segmento (para espaços/acentos)
   return path
     .split("/")
     .map((segment) => encodeURIComponent(segment))
     .join("/");
-}
-
-async function fetchMediaById(args: {
-  id: string;
-  accessToken: string;
-}): Promise<MediaDetail | null> {
-  const env = getServerEnv();
-  const supabaseUrl = env.SUPABASE_URL;
-  const supabaseAnonKey = env.SUPABASE_ANON_KEY;
-
-  const url = new URL(`${supabaseUrl}/rest/v1/${MEDIA_RESOURCE}`);
-  url.searchParams.set("id", `eq.${args.id}`);
-  url.searchParams.set(
-    "select",
-    [
-      "id",
-      "title",
-      "description",
-      "media_type",
-      "created_at",
-      "tags",
-      "storage_bucket",
-      "storage_object_path",
-      "mime_type",
-      "thumbnail_url",
-      "original_filename",
-      "size_bytes",
-      "metadata",
-    ].join(",")
-  );
-  url.searchParams.set("limit", "1");
-
-  const response = await fetch(url.toString(), {
-    headers: {
-      apikey: supabaseAnonKey,
-      Authorization: `Bearer ${args.accessToken}`,
-      Accept: "application/json",
-    },
-  });
-
-  if (response.status === 401 || response.status === 403) {
-    const err = new Error("AUTH_INVALID");
-    (err as any).code = "AUTH_INVALID";
-    throw err;
-  }
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`PostgREST error ${response.status}: ${body}`);
-  }
-
-  const data = (await response.json()) as MediaDetail[];
-  return data[0] ?? null;
-}
-
-async function createSignedUrl(args: {
-  accessToken: string;
-  bucket: string;
-  objectPath: string;
-  expiresInSeconds: number;
-}): Promise<string> {
-  const env = getServerEnv();
-  const supabaseUrl = env.SUPABASE_URL;
-  const supabaseAnonKey = env.SUPABASE_ANON_KEY;
-
-  const encodedPath = encodeObjectPathPreservingSlashes(args.objectPath);
-
-  // Endpoint REST do Storage para signed URL:
-  // POST /storage/v1/object/sign/:bucket/:path  body: { expiresIn: <seconds> }
-  const endpoint = `${supabaseUrl}/storage/v1/object/sign/${encodeURIComponent(
-    args.bucket
-  )}/${encodedPath}`;
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      apikey: supabaseAnonKey,
-      Authorization: `Bearer ${args.accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({ expiresIn: args.expiresInSeconds }),
-  });
-
-  if (response.status === 401 || response.status === 403) {
-    const err = new Error("AUTH_INVALID");
-    (err as any).code = "AUTH_INVALID";
-    throw err;
-  }
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`Storage sign error ${response.status}: ${body}`);
-  }
-
-  const payload = (await response.json()) as { signedURL?: string };
-  const signedURL = payload?.signedURL;
-
-  if (!signedURL || typeof signedURL !== "string") {
-    throw new Error("Storage sign error: signedURL ausente na resposta.");
-  }
-
-  // Supabase normalmente retorna um path relativo. Normaliza para absoluto.
-  if (signedURL.startsWith("http://") || signedURL.startsWith("https://")) {
-    return signedURL;
-  }
-
-  // Normaliza para sempre ficar sob /storage/v1
-  if (signedURL.startsWith("/storage/v1/")) {
-    return `${supabaseUrl}${signedURL}`;
-  }
-
-  const normalized =
-    signedURL.startsWith("/")
-      ? `/storage/v1${signedURL}`
-      : `/storage/v1/${signedURL}`;
-
-  return `${supabaseUrl}${normalized}`;
 }
 
 type MetadataFile = {
@@ -202,10 +99,145 @@ function filenameFromPath(path: string): string {
   return seg && seg.trim().length ? seg : "(arquivo)";
 }
 
+/* ============================================================
+ * Supabase helpers (SSR)
+ * ============================================================ */
 
-/* ===========================
+async function fetchMediaById(args: {
+  id: string;
+  accessToken: string;
+}): Promise<MediaDetail | null> {
+  const env = getServerEnv();
+  const supabaseUrl = env.SUPABASE_URL;
+
+  const url = new URL(`${supabaseUrl}/rest/v1/${MEDIA_RESOURCE}`);
+  url.searchParams.set("id", `eq.${args.id}`);
+  url.searchParams.set(
+    "select",
+    [
+      "id",
+      "title",
+      "description",
+      "media_type",
+      "created_at",
+      "tags",
+      "storage_bucket",
+      "storage_object_path",
+      "mime_type",
+      "thumbnail_url",
+      "original_filename",
+      "size_bytes",
+      "metadata",
+    ].join(",")
+  );
+  url.searchParams.set("limit", "1");
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      apikey: env.SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${args.accessToken}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (response.status === 401 || response.status === 403) {
+    const err = new Error("AUTH_INVALID");
+    (err as any).code = "AUTH_INVALID";
+    throw err;
+  }
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`PostgREST error ${response.status}: ${body}`);
+  }
+
+  const data = (await response.json()) as MediaDetail[];
+  return data[0] ?? null;
+}
+
+async function createSignedUrl(args: {
+  accessToken: string;
+  bucket: string;
+  objectPath: string;
+  expiresInSeconds: number;
+}): Promise<string> {
+  const env = getServerEnv();
+
+  // base interna (server -> supabase)
+  const supabaseUrl = env.SUPABASE_URL;
+
+  // base pública (browser -> supabase)
+  // defina SUPABASE_PUBLIC_URL no .env como: http://jupiter.local:54321
+  const publicBase =
+    (process.env.SUPABASE_PUBLIC_URL && process.env.SUPABASE_PUBLIC_URL.trim()) ||
+    supabaseUrl;
+
+  const publicBaseNoSlash = String(publicBase).replace(/\/+$/, "");
+
+  // IMPORTANT: path precisa ser codificado por segmento (preserva /)
+  const encodedPath = encodeObjectPathPreservingSlashes(args.objectPath);
+
+  const endpoint = `${supabaseUrl}/storage/v1/object/sign/${encodeURIComponent(
+    args.bucket
+  )}/${encodedPath}`;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      apikey: env.SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${args.accessToken}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ expiresIn: args.expiresInSeconds }),
+  });
+
+  if (response.status === 401 || response.status === 403) {
+    const err = new Error("AUTH_INVALID");
+    (err as any).code = "AUTH_INVALID";
+    throw err;
+  }
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Storage sign error ${response.status}: ${body}`);
+  }
+
+  const payload = (await response.json()) as { signedURL?: string };
+  const signedURL = payload?.signedURL;
+
+  if (!signedURL || typeof signedURL !== "string") {
+    throw new Error("Storage sign error: signedURL ausente na resposta.");
+  }
+
+  // Se vier absoluto, reescreve host/protocol para o host público
+  if (signedURL.startsWith("http://") || signedURL.startsWith("https://")) {
+    try {
+      const u = new URL(signedURL);
+      const p = new URL(publicBaseNoSlash);
+      u.protocol = p.protocol;
+      u.host = p.host;
+      return u.toString();
+    } catch {
+      return signedURL;
+    }
+  }
+
+  // Normaliza para sempre ficar sob /storage/v1 no host público
+  if (signedURL.startsWith("/storage/v1/")) {
+    return `${publicBaseNoSlash}${signedURL}`;
+  }
+
+  const normalized =
+    signedURL.startsWith("/") ? `/storage/v1${signedURL}` : `/storage/v1/${signedURL}`;
+
+  return `${publicBaseNoSlash}${normalized}`;
+}
+
+/* ============================================================
  * Loader SSR (rota protegida)
- * =========================== */
+ * ============================================================ */
+
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const id = params.id;
 
@@ -260,7 +292,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           ]
           : [];
 
-    const signedFiles = await Promise.all(
+    const signedFiles: SignedFile[] = await Promise.all(
       files.map(async (f) => {
         const signedUrl = await createSignedUrl({
           accessToken,
@@ -274,13 +306,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           path: f.path,
           signedUrl,
           mime_type: f.mime_type,
-          original_filename: f.original_filename ?? filenameFromPath(f.path),
+          original_filename: (f.original_filename ?? filenameFromPath(f.path)).trim(),
           size_bytes: f.size_bytes,
         };
       })
     );
 
-    // Compat: mantém signedUrl (primário) para UI legada/elementos que ainda esperam um único arquivo.
     const signedUrl =
       Array.isArray(signedFiles) && signedFiles.length > 0 ? signedFiles[0].signedUrl : null;
 
@@ -302,9 +333,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 }
 
-/* ===========================
+/* ============================================================
  * UI
- * =========================== */
+ * ============================================================ */
+
 function safeFromParam(raw: string | null): string | null {
   if (!raw) return null;
   if (raw.startsWith("/app")) return raw; // evita open redirect
@@ -341,19 +373,20 @@ export default function MediaDetailRoute() {
       ? media.description.trim()
       : "";
 
-  const primary = Array.isArray(signedFiles) && signedFiles.length ? signedFiles[0] : null;
-  const primaryMime = primary?.mime_type ?? "";
-  const primaryCanPreviewImage = !!primary?.signedUrl && primaryMime.startsWith("image/");
-  const primaryCanPreviewVideo = !!primary?.signedUrl && primaryMime.startsWith("video/");
-  const primaryCanPreviewAudio = !!primary?.signedUrl && primaryMime.startsWith("audio/");
-
-
   return (
     <div className="mx-auto max-w-4xl px-4 py-6">
-      <div className="mb-4">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <Link to={backHref} className="text-sm text-blue-600 hover:underline">
           Voltar
         </Link>
+
+        <a
+          href={`/app/media/${media.id}/zip`}
+          download
+          className="inline-flex items-center rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white"
+        >
+          Baixar ZIP
+        </a>
       </div>
 
       <div className="rounded-lg border bg-white p-5">
@@ -379,7 +412,8 @@ export default function MediaDetailRoute() {
           <div className="mt-2 border-t pt-3">
             <div className="grid gap-1">
               <div>
-                <strong>Arquivos:</strong> {Array.isArray(signedFiles) ? signedFiles.length : 0}
+                <strong>Arquivos:</strong>{" "}
+                {Array.isArray(signedFiles) ? signedFiles.length : 0}
               </div>
               <div>
                 <strong>Storage (primário):</strong>{" "}
@@ -399,7 +433,6 @@ export default function MediaDetailRoute() {
         </div>
 
         <div className="mt-6">
-
           <div className="mb-2 text-sm font-medium">Arquivos</div>
 
           {!Array.isArray(signedFiles) || signedFiles.length === 0 ? (
@@ -415,7 +448,10 @@ export default function MediaDetailRoute() {
                 const canAud = mime.startsWith("audio/");
 
                 return (
-                  <div key={`${f.bucket}:${f.path}`} className="rounded-md border bg-white p-4">
+                  <div
+                    key={`${f.bucket}:${f.path}`}
+                    className="rounded-md border bg-white p-4"
+                  >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium text-slate-900">
@@ -425,7 +461,8 @@ export default function MediaDetailRoute() {
                           {f.bucket}/{f.path}
                         </div>
                         <div className="mt-1 text-xs text-slate-600">
-                          MIME: {mime || "—"} • Tamanho: {formatBytes(f.size_bytes ?? null)}
+                          MIME: {mime || "—"} • Tamanho:{" "}
+                          {formatBytes(f.size_bytes ?? null)}
                         </div>
                       </div>
 
@@ -482,9 +519,10 @@ export default function MediaDetailRoute() {
   );
 }
 
-/* ===========================
+/* ============================================================
  * ErrorBoundary
- * =========================== */
+ * ============================================================ */
+
 export function ErrorBoundary() {
   const error = useRouteError();
   const [searchParams] = useSearchParams();
@@ -515,10 +553,7 @@ export function ErrorBoundary() {
         <p className="mt-2 text-sm text-gray-700">
           {error.status} {error.statusText}
         </p>
-        <Link
-          to={backHref}
-          className="mt-4 inline-block text-sm text-blue-600 hover:underline"
-        >
+        <Link to={backHref} className="mt-4 inline-block text-sm text-blue-600 hover:underline">
           Voltar
         </Link>
       </div>
@@ -531,10 +566,7 @@ export function ErrorBoundary() {
       <p className="mt-2 text-sm text-gray-700">
         {(error as Error)?.message ?? "Falha ao carregar o detalhe da mídia."}
       </p>
-      <Link
-        to={backHref}
-        className="mt-4 inline-block text-sm text-blue-600 hover:underline"
-      >
+      <Link to={backHref} className="mt-4 inline-block text-sm text-blue-600 hover:underline">
         Voltar
       </Link>
     </div>
