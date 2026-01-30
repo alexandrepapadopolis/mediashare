@@ -90,6 +90,26 @@ export default function AppIndexRoute() {
     return `/app/media/${id}?${params.toString()}`;
   }
 
+  function formatDateTime(value: string) {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? value : d.toLocaleString();
+  }
+
+  function MediaThumb({ src, alt }: { src: string; alt: string }) {
+    return (
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        onError={(e) => {
+          (e.currentTarget as HTMLImageElement).style.display = "none";
+        }}
+        className="h-full w-full rounded-lg object-cover"
+      />
+    );
+  }
+
+
   return (
     <div className="space-y-6">
       {isLoading ? (
@@ -184,9 +204,8 @@ export default function AppIndexRoute() {
             to={buildPageHref(appliedFilters.page - 1)}
             prefetch="intent"
             aria-disabled={!hasPrev}
-            className={`rounded-xl border px-4 py-2 text-sm ${
-              !hasPrev ? "pointer-events-none opacity-50" : ""
-            }`}
+            className={`rounded-xl border px-4 py-2 text-sm ${!hasPrev ? "pointer-events-none opacity-50" : ""
+              }`}
           >
             Anterior
           </Link>
@@ -200,9 +219,8 @@ export default function AppIndexRoute() {
             to={buildPageHref(appliedFilters.page + 1)}
             prefetch="intent"
             aria-disabled={!hasNext}
-            className={`ml-auto rounded-xl border px-4 py-2 text-sm ${
-              !hasNext ? "pointer-events-none opacity-50" : ""
-            }`}
+            className={`ml-auto rounded-xl border px-4 py-2 text-sm ${!hasNext ? "pointer-events-none opacity-50" : ""
+              }`}
           >
             Próxima
           </Link>
@@ -219,27 +237,36 @@ export default function AppIndexRoute() {
       <div className="grid gap-4 md:grid-cols-3">
         {items.length === 0
           ? Array.from({ length: 9 }).map((_, i) => (
-              <div key={i} className="rounded-2xl border bg-white p-4">
-                <div className="aspect-video rounded-lg bg-muted" />
-                <div className="mt-3 h-4 w-2/3 rounded bg-muted" />
-                <div className="mt-2 h-3 w-1/2 rounded bg-muted" />
-              </div>
-            ))
+            <div key={i} className="rounded-2xl border bg-white p-4">
+              <div className="aspect-video rounded-lg bg-muted" />
+              <div className="mt-3 h-4 w-2/3 rounded bg-muted" />
+              <div className="mt-2 h-3 w-1/2 rounded bg-muted" />
+            </div>
+          ))
           : items.map((it) => (
-              <Link
-                key={it.id}
-                to={buildDetailHref(it.id)}
-                prefetch="intent"
-                className="block rounded-2xl border bg-white p-4 hover:bg-muted/40"
-                aria-label={`Abrir detalhes: ${it.title ?? "mídia"}`}
-              >
-                <div className="aspect-video rounded-lg bg-muted" />
-                <div className="mt-3 text-sm font-medium">{it.title}</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {it.media_type} • {new Date(it.created_at).toLocaleString()}
-                </div>
-              </Link>
-            ))}
+            <Link
+              key={it.id}
+              to={buildDetailHref(it.id)}
+              prefetch="intent"
+              className="block rounded-2xl border bg-white p-4 hover:bg-muted/40"
+              aria-label={`Abrir detalhes: ${it.title ?? "mídia"}`}
+            >
+              <div className="aspect-video overflow-hidden rounded-lg bg-muted">
+                {it.thumbnail_url ? (
+                  <MediaThumb
+                    src={it.thumbnail_url}
+                    alt={it.title ?? "Thumbnail"}
+                  />
+                ) : (
+                  <div className="h-full w-full" />
+                )}
+              </div>
+              <div className="mt-3 text-sm font-medium">{it.title}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {it.media_type} • {formatDateTime(it.created_at)}
+              </div>
+            </Link>
+          ))}
       </div>
     </div>
   );
