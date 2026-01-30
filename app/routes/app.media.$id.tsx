@@ -20,6 +20,7 @@ type MediaDetail = {
   media_type: string | null;
   created_at: string | null;
   tags: unknown;
+  thumbnail_url?: string | null;
 
   // P13-2 armazena múltiplos arquivos em metadata.files[]
   metadata: unknown;
@@ -72,6 +73,7 @@ async function fetchMediaById(args: {
       "storage_bucket",
       "storage_object_path",
       "mime_type",
+      "thumbnail_url",
       "original_filename",
       "size_bytes",
       "metadata",
@@ -333,7 +335,7 @@ export default function MediaDetailRoute() {
     : typeof media.tags === "string"
       ? media.tags
       : "";
- 
+
   const descriptionText =
     typeof media.description === "string" && media.description.trim().length > 0
       ? media.description.trim()
@@ -397,6 +399,7 @@ export default function MediaDetailRoute() {
         </div>
 
         <div className="mt-6">
+
           <div className="mb-2 text-sm font-medium">Arquivos</div>
 
           {!Array.isArray(signedFiles) || signedFiles.length === 0 ? (
