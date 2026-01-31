@@ -13,7 +13,7 @@ type ServerEnv = {
 };
 
 type PublicEnv = {
-  SUPABASE_URL: string;
+  SUPABASE_PUBLIC_URL: string;
   SUPABASE_ANON_KEY: string;
 };
 
@@ -47,12 +47,11 @@ export function getServerEnv(): ServerEnv {
 }
 
 export function getPublicEnv(): PublicEnv {
-  const supabaseUrl = required("SUPABASE_URL");
-  const supabasePublicUrl = optional("SUPABASE_PUBLIC_URL") ?? supabaseUrl;
+  const supabasePublicUrl = required("SUPABASE_PUBLIC_URL");
 
   return {
     // Para o browser, SEMPRE a URL pública
-    SUPABASE_URL: supabasePublicUrl,
+    SUPABASE_PUBLIC_URL: supabasePublicUrl,
     SUPABASE_ANON_KEY: required("SUPABASE_ANON_KEY"),
   };
 }
