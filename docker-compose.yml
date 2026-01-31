@@ -6,6 +6,7 @@ services:
     profiles: ["dev"]
     image: node:20-bookworm-slim
     working_dir: /app
+
     ports:
       - "3000:3000"
       - "3001:3001"
@@ -18,13 +19,23 @@ services:
       - .env
 
     environment:
+      # --- File watching ---
       CHOKIDAR_USEPOLLING: "true"
       CHOKIDAR_INTERVAL: "200"
+
+      # --- Node / Remix ---
       NPM_CONFIG_UPDATE_NOTIFIER: "false"
+      NODE_ENV: development
       HOST: 0.0.0.0
       PORT: "3000"
-      NODE_ENV: development
       REMIX_DEV_ORIGIN: "http://jupiter.local:3001"
+
+      # --- Supabase ---
+      # IMPORTANTE:
+      # - SUPABASE_URL: usado INTERNAMENTE pelo server (container -> supabase)
+      # - SUPABASE_PUBLIC_URL: (vem do .env)
+      #
+      # Em dev local, ambos apontam para o Supabase local
 
     volumes:
       - .:/app
@@ -33,29 +44,33 @@ services:
     command: >
       sh -lc "
         set -e;
+
         echo 'Iniciando Phosio Web...';
 
         NEED_NPM_CI=0;
 
+        # node_modules ausente ou remix não instalado
         if [ ! -d ./node_modules ] || [ ! -x ./node_modules/.bin/remix ]; then
           NEED_NPM_CI=1;
         fi;
 
+        # dependências críticas (native + runtime)
         node -e \"require('sharp')\" >/dev/null 2>&1 || NEED_NPM_CI=1;
+        node -e \"require('archiver')\" >/dev/null 2>&1 || NEED_NPM_CI=1;
 
         if [ \"$$NEED_NPM_CI\" = \"1\" ]; then
-          echo 'Instalando toolchain mínima (para dependências nativas, ex.: sharp)...';
+          echo 'Instalando toolchain mínima (sharp / archiver)…';
+
           apt-get update;
           apt-get install -y --no-install-recommends python3 make g++;
           rm -rf /var/lib/apt/lists/*;
 
-          echo 'Instalando dependências (npm ci)...';
+          echo 'Instalando dependências (npm ci)…';
           npm ci --foreground-scripts --no-audit --no-fund;
         fi;
 
         exec ./node_modules/.bin/remix dev
       "
-
 
   app-prod:
     container_name: phosio-app-prod
@@ -65,8 +80,8 @@ services:
       - .env
     environment:
       NODE_ENV: production
-      PORT: "3000"
       HOST: 0.0.0.0
+      PORT: "3000"
     ports:
       - "8080:3000"
     restart: unless-stopped
