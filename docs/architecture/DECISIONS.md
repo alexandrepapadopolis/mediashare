@@ -161,3 +161,33 @@ O thumbnail é **best-effort**: falhas de geração/upload **não** devem bloque
 - Dependência adicional: **Sharp** no ambiente server-side (container Node).
 - Requer atenção às políticas do **Storage**: operações de upload precisam estar compatíveis com RLS/policies do bucket/objeto
   (ex.: paths sob `thumbnails/...` devem ser permitidos para o usuário autenticado), sob pena de `new row violates row-level security policy`.
+
+---
+
+## ADR-009 — Supabase local em portas 65xxx e separação de URLs interna/pública
+
+**Status:** Aceito  
+**Data:** 2026
+
+### Contexto
+Em ambiente Windows, o Supabase local apresentou falhas recorrentes ao tentar bindar portas `54321–54324`,
+mesmo quando livres (`bind: An attempt was made to access a socket in a way forbidden by its access permissions`).
+
+Além disso, aplicações SSR precisam diferenciar claramente:
+- comunicação **server-side** (container → Supabase), e
+- comunicação **client-side** (browser → Supabase).
+
+### Decisão
+1. Executar o Supabase local em **portas 65xxx** no Windows (ex.: `65421`, `65423`, `65424`, `65432`).
+2. Definir dois contratos explícitos de URL:
+   - `SUPABASE_URL` — **interna**, para uso server-side/container (ex.: `http://host.docker.internal:65421`)
+   - `SUPABASE_PUBLIC_URL` — **pública**, para uso no browser/dispositivos (ex.: `http://jupiter.local:65421`)
+3. O browser **não** deve consumir `SUPABASE_URL`. Em runtime (via `/env.js`), publicar apenas `SUPABASE_PUBLIC_URL` e `SUPABASE_ANON_KEY`.
+
+### Consequências
+- Ambiente local fica estável no Windows, evitando a faixa problemática de portas.
+- SSR funciona corretamente sem gambiarras de hostname (server e browser usam URLs distintas, ambas explícitas).
+- A aplicação mantém a separação entre **segredos** (server-only) e **vars públicas** (browser).
+- A documentação do ambiente deve refletir as portas efetivas e o contrato de variáveis.
+
+---

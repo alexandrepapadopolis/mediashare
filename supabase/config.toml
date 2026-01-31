@@ -5,17 +5,17 @@ project_id = "phosio"
 # =================================================================
 
 [api]
-port = 54321
+port = 65421
 schemas = ["public", "storage", "graphql_public"]
 extra_search_path = ["public", "extensions"]
 max_rows = 1000
 
 [db]
-port = 54322
+port = 65432
 major_version = 15
 
 [studio]
-port = 54323
+port = 65423
 
 # =================================================================
 # CONFIGURAÇÃO DE STORAGE (MÍDIAS)
@@ -36,6 +36,16 @@ allowed_mime_types = ["image/*", "video/*", "application/pdf"]
 site_url = "http://jupiter.local:5173"
 additional_redirect_urls = ["http://jupiter.local:5173","http://jupiter:5173"]
 enable_signup = true
+
+# =================================================================
+# CONFIGURAÇÃO DE CAIXA DE E-MAIL (AUTH)
+# =================================================================
+[inbucket]
+enabled = true
+port = 65424
+smtp_port = 65425
+pop3_port = 65426
+
 
 # =================================================================
 # LOGS E ANALYTICS (OPCIONAL)
